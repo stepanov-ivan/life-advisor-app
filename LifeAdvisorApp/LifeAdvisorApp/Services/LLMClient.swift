@@ -1,14 +1,6 @@
 import Foundation
 
 enum LLMClient {
-    private struct IngredientsEnvelope: Decodable {
-        let ingredients: [IngredientResult]
-    }
-
-    private struct BatchIngredientsEnvelope: Decodable {
-        let items: [[IngredientResult]]
-    }
-
     private struct ChatRequest: Encodable {
         let model: String
         let messages: [Message]
@@ -22,10 +14,6 @@ enum LLMClient {
 
         struct ResponseFormat: Encodable {
             let type: String
-
-            enum CodingKeys: String, CodingKey {
-                case type
-            }
         }
 
         init(model: String, messages: [Message], temperature: Double = 0.3, jsonMode: Bool = false) {
@@ -48,10 +36,75 @@ enum LLMClient {
         }
     }
 
-    struct IngredientResult: Decodable {
+    struct Totals: Decodable {
+        let calories: Double
+        let proteins: Double
+        let fats: Double
+        let carbs: Double
+    }
+
+    struct EstimateItemResult: Decodable {
         let name: String
-        let amount: Double
-        let unit: String
+        let estimatedCalories: Double
+        let estimatedProteins: Double
+        let estimatedFats: Double
+        let estimatedCarbs: Double
+        let impactScore: Double
+        let reason: String
+        let highCalorieFlag: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case name, estimatedCalories, estimatedProteins, estimatedFats, estimatedCarbs, reason
+            case impactScore = "impact_score"
+            case highCalorieFlag = "high_calorie_flag"
+        }
+
+        var clampedImpactScore: Double { min(1, max(0, impactScore)) }
+    }
+
+    struct EstimationResult: Decodable {
+        let mode: String
+        let totals: Totals
+        let confidence: String
+        let items: [EstimateItemResult]
+        let assumptions: [String]?
+        let modelId: String
+        let promptVersion: String
+        let estimationSchemaVersion: String
+
+        enum CodingKeys: String, CodingKey {
+            case mode, totals, confidence, items, assumptions, modelId, promptVersion, estimationSchemaVersion
+        }
+
+        func validate() throws {
+            guard ["ingredient_breakdown", "composite_item"].contains(mode) else {
+                throw LLMError.parseError("Unknown mode")
+            }
+            guard ["low", "medium", "high"].contains(confidence) else {
+                throw LLMError.parseError("Unknown confidence")
+            }
+            guard !items.isEmpty else {
+                throw LLMError.parseError("Items must not be empty")
+            }
+            if mode == "ingredient_breakdown" {
+                let sumCalories = items.reduce(0) { $0 + $1.estimatedCalories }
+                let sumProteins = items.reduce(0) { $0 + $1.estimatedProteins }
+                let sumFats = items.reduce(0) { $0 + $1.estimatedFats }
+                let sumCarbs = items.reduce(0) { $0 + $1.estimatedCarbs }
+                guard withinTolerance(sumCalories, totals.calories),
+                      withinTolerance(sumProteins, totals.proteins),
+                      withinTolerance(sumFats, totals.fats),
+                      withinTolerance(sumCarbs, totals.carbs)
+                else {
+                    throw LLMError.parseError("Breakdown totals mismatch")
+                }
+            }
+        }
+
+        private func withinTolerance(_ lhs: Double, _ rhs: Double) -> Bool {
+            let base = max(1, abs(rhs))
+            return abs(lhs - rhs) / base <= 0.05
+        }
     }
 
     static var endpoint: String {
@@ -64,6 +117,11 @@ enum LLMClient {
 
     static var apiKey: String {
         KeychainHelper.read(key: "llm_api_key") ?? ""
+    }
+
+    static var requestTimeout: TimeInterval {
+        let configured = UserDefaults.standard.double(forKey: "llm_timeout_seconds")
+        return configured > 0 ? configured : 90
     }
 
     static var isConfigured: Bool {
@@ -87,11 +145,16 @@ enum LLMClient {
             jsonMode: jsonMode
         )
 
-        var urlRequest = URLRequest(url: URL(string: "\(endpoint)/chat/completions")!)
+        guard let base = URL(string: endpoint) else {
+            throw LLMError.parseError("Invalid endpoint")
+        }
+        let url = base.appending(path: "chat/completions")
+
+        var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        urlRequest.timeoutInterval = 30
+        urlRequest.timeoutInterval = requestTimeout
         urlRequest.httpBody = try JSONEncoder().encode(request)
 
         let (data, response) = try await URLSession.shared.data(for: urlRequest)
@@ -116,102 +179,63 @@ enum LLMClient {
         return content
     }
 
-    static func structurize(text: String) async throws -> [IngredientResult] {
+    static func estimateMeal(text: String) async throws -> (parsed: EstimationResult, rawPayload: String) {
         let systemPrompt = """
-        Ты — помощник по питанию. Извлеки из описания приёма пищи список ингредиентов
-        с количеством и единицей измерения. Отвечай ТОЛЬКО валидным JSON-объектом:
-        {"ingredients":[{"name": "название", "amount": число, "unit": "г/мл/шт"}]}
-        Количество оценивай в граммах/миллилитрах. Будь консервативен в оценках порций.
+        Ты — агент оценки питания. Верни ТОЛЬКО валидный JSON.
+        Формат:
+        {
+          "mode": "ingredient_breakdown|composite_item",
+          "totals": {"calories": number, "proteins": number, "fats": number, "carbs": number},
+          "confidence": "low|medium|high",
+          "items": [{
+            "name": string,
+            "estimatedCalories": number,
+            "estimatedProteins": number,
+            "estimatedFats": number,
+            "estimatedCarbs": number,
+            "impact_score": number,
+            "reason": string,
+            "high_calorie_flag": bool
+          }],
+          "assumptions": [string],
+          "modelId": string,
+          "promptVersion": "v1",
+          "estimationSchemaVersion": "v1"
+        }
+        Для composite_item верни минимум один item.
         """
 
-        let response = try await chat(
-            userMessage: text,
-            systemPrompt: systemPrompt,
-            jsonMode: true
-        )
-
+        let response = try await chat(userMessage: text, systemPrompt: systemPrompt, jsonMode: true)
         guard let data = response.data(using: .utf8) else {
-            throw LLMError.parseError
+            throw LLMError.parseError("Response encoding")
         }
 
-        if let ingredients = try? JSONDecoder().decode([IngredientResult].self, from: data) {
-            return ingredients
-        }
-
-        if let wrapped = try? JSONDecoder().decode(IngredientsEnvelope.self, from: data) {
-            return wrapped.ingredients
-        }
-
-        throw LLMError.parseError
-    }
-
-    static func batchStructurize(texts: [String]) async throws -> [[IngredientResult]] {
-        let systemPrompt = """
-        Ты — помощник по питанию. Извлеки из КАЖДОГО описания список ингредиентов.
-        Отвечай ТОЛЬКО валидным JSON-объектом:
-        {"items":[[{"name": "...", "amount": число, "unit": "г/мл/шт"}, ...], ...]}
-        Каждый подмассив в items соответствует одному описанию в том же порядке.
-        """
-
-        let combined = texts.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
-        let response = try await chat(
-            userMessage: combined,
-            systemPrompt: systemPrompt,
-            jsonMode: true
-        )
-
-        guard let data = response.data(using: .utf8) else {
-            throw LLMError.parseError
-        }
-
-        if let results = try? JSONDecoder().decode([[IngredientResult]].self, from: data) {
-            return results
-        }
-
-        if let wrapped = try? JSONDecoder().decode(BatchIngredientsEnvelope.self, from: data) {
-            return wrapped.items
-        }
-
-        throw LLMError.parseError
+        let parsed = try JSONDecoder().decode(EstimationResult.self, from: data)
+        try parsed.validate()
+        return (parsed, response)
     }
 
     static func dailyAdvice(
-        meals: [(window: String, rawText: String?, ingredients: [IngredientResult], calories: Double, proteins: Double, fats: Double, carbs: Double)],
+        meals: [(window: String, calories: Double, proteins: Double, fats: Double, carbs: Double)],
         goalCalories: Double,
         skippedWindows: [String]
     ) async throws -> String {
-        var mealDescriptions = ""
-        for meal in meals {
-            let ingredientList = meal.ingredients.map { "\($0.name) \(Int($0.amount))\($0.unit)" }.joined(separator: ", ")
-            mealDescriptions += """
-            \(meal.window): \(ingredientList)
-            Калории: \(Int(meal.calories)), Б: \(Int(meal.proteins))г, Ж: \(Int(meal.fats))г, У: \(Int(meal.carbs))г
+        let mealsText = meals.map {
+            "\($0.window): \(Int($0.calories)) ккал (Б:\(Int($0.proteins)) Ж:\(Int($0.fats)) У:\(Int($0.carbs)))"
+        }.joined(separator: "\n")
 
-            """
-        }
-
-        var skippedText = ""
-        if !skippedWindows.isEmpty {
-            skippedText = "\nПропущенные приёмы: \(skippedWindows.joined(separator: ", "))"
-        }
-
-        let systemPrompt = """
-        Ты — персональный диетолог. Проанализируй питание за день и дай совет.
-        Оцени: баланс БЖУ, качество продуктов (фастфуд, клетчатка, сахар, овощи),
-        соответствие цели. Учитывай пропущенные приёмы.
-        Дай практичные рекомендации на завтра. Будь поддерживающим, но честным.
-        """
+        let skippedText = skippedWindows.isEmpty ? "" : "\nПропущенные приёмы: \(skippedWindows.joined(separator: ", "))"
 
         let userMessage = """
         Цель: \(Int(goalCalories)) ккал
 
         Съедено за день:
-        \(mealDescriptions)\(skippedText)
+        \(mealsText)\(skippedText)
 
-        Дай совет дня.
+        Дай краткий совет дня.
         """
 
-        return try await chat(userMessage: userMessage, systemPrompt: systemPrompt)
+        return try await chat(userMessage: userMessage, systemPrompt: "Ты персональный диетолог")
     }
 
     static func recommendation(
@@ -220,29 +244,18 @@ enum LLMClient {
         goalCalories: Double
     ) async throws -> String {
         let eatenText = eaten.map {
-            "\($0.window): \(Int($0.calories)) ккал (Б:\(Int($0.proteins)), Ж:\(Int($0.fats)), У:\(Int($0.carbs)))"
+            "\($0.window): \(Int($0.calories)) ккал (Б:\(Int($0.proteins)) Ж:\(Int($0.fats)) У:\(Int($0.carbs)))"
         }.joined(separator: "\n")
-
-        let remainingText = remainingWindows.joined(separator: ", ")
-        let remainingCalories = goalCalories - eaten.reduce(0) { $0 + $1.calories }
-
-        let systemPrompt = """
-        Ты — персональный диетолог. Распредели оставшиеся калории и БЖУ на оставшиеся приёмы.
-        Дай конкретные рекомендации: сколько калорий на каждый приём,
-        какой баланс БЖУ, какие продукты предпочесть.
-        """
 
         let userMessage = """
         Цель: \(Int(goalCalories)) ккал
         Уже съедено:
         \(eatenText)
-        Осталось: \(Int(max(0, remainingCalories))) ккал
-        Оставшиеся приёмы: \(remainingText)
+        Остались окна: \(remainingWindows.joined(separator: ", "))
 
-        Дай рекомендацию по распределению.
+        Дай рекомендацию по распределению калорий и БЖУ.
         """
-
-        return try await chat(userMessage: userMessage, systemPrompt: systemPrompt)
+        return try await chat(userMessage: userMessage, systemPrompt: "Ты персональный диетолог")
     }
 }
 
@@ -252,16 +265,16 @@ enum LLMError: Error, LocalizedError {
     case unauthorized
     case serverError(Int)
     case emptyResponse
-    case parseError
+    case parseError(String)
 
     var errorDescription: String? {
         switch self {
-        case .notConfigured: "LLM не настроен. Укажите endpoint, ключ и модель в настройках."
-        case .networkError: "Нет соединения с сервером."
-        case .unauthorized: "Ошибка авторизации. Проверьте API-ключ."
-        case .serverError(let code): "Ошибка сервера (\(code))."
-        case .emptyResponse: "Пустой ответ от LLM."
-        case .parseError: "Не удалось разобрать ответ LLM."
+        case .notConfigured: return "LLM не настроен. Укажите endpoint, ключ и модель в настройках."
+        case .networkError: return "Нет соединения с сервером."
+        case .unauthorized: return "Ошибка авторизации. Проверьте API-ключ."
+        case .serverError(let code): return "Ошибка сервера (\(code))."
+        case .emptyResponse: return "Пустой ответ от LLM."
+        case .parseError(let reason): return "Не удалось разобрать ответ LLM: \(reason)."
         }
     }
 }

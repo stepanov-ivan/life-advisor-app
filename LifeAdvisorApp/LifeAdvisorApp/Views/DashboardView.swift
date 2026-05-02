@@ -1,40 +1,22 @@
 import SwiftUI
 import SwiftData
 
-struct StructuredIngredientDraft: Identifiable {
-    let id = UUID()
-    let name: String
-    let amount: Double
-    let unit: String
-    let calories: Double
-    let proteins: Double
-    let fats: Double
-    let carbs: Double
-}
-
 struct DashboardView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \MealWindow.order) private var windows: [MealWindow]
-    @State private var selectedSlotWindow: String?
-    @State private var editingEvent: MealEvent?
-    @State private var logText = ""
     @StateObject private var notificationManager = NotificationManager.shared
 
+    @State private var selectedWindow: String?
+    @State private var editingEvent: MealEvent?
+    @State private var logText = ""
+
     var todayEvents: [MealEvent] {
-        let calendar = Calendar.current
-        let startOfDay = calendar.startOfDay(for: Date())
+        let start = Calendar.current.startOfDay(for: Date())
         let descriptor = FetchDescriptor<MealEvent>(
-            predicate: #Predicate { $0.timestamp >= startOfDay }
+            predicate: #Predicate { $0.timestamp >= start },
+            sortBy: [SortDescriptor(\MealEvent.timestamp, order: .reverse)]
         )
         return (try? modelContext.fetch(descriptor)) ?? []
-    }
-
-    var todayRecommendation: Recommendation? {
-        let dateKey = DailyAdvice.dateKey(from: Date())
-        let descriptor = FetchDescriptor<Recommendation>(
-            predicate: #Predicate { $0.date == dateKey }
-        )
-        return try? modelContext.fetch(descriptor).first
     }
 
     var body: some View {
@@ -42,58 +24,57 @@ struct DashboardView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     DisclosureGroup("Питание") {
-                        ForEach(windows.sorted(by: { $0.order < $1.order })) { window in
+                        ForEach(windows) { window in
+                            let event = latestEvent(for: window.name)
                             MealSlotCard(
                                 windowLabel: window.name,
                                 timeRange: "\(window.startTimeString)–\(window.endTimeString)",
-                                event: todayEvents.first(where: { $0.windowLabel == window.name }),
-                                recommendationText: todayRecommendation?.recommendationText,
-                                recommendationEnabled: canRequestRecommendation(for: window.name),
-                                onTap: { event in
+                                event: event,
+                                onTap: {
                                     if let event {
                                         editingEvent = event
                                     } else {
-                                        selectedSlotWindow = window.name
+                                        selectedWindow = window.name
                                         logText = ""
                                     }
-                                },
-                                onRequestRecommendation: {
-                                    requestRecommendation(for: window.name)
                                 }
                             )
                         }
                     }
                     .padding(.horizontal)
 
-                    actionButtons
+                    Button {
+                        requestDailyAdvice()
+                    } label: {
+                        Text("Совет дня")
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(canGetAdvice ? Color.green : Color.gray.opacity(0.3))
+                            .foregroundColor(.white)
+                            .cornerRadius(12)
+                    }
+                    .padding(.horizontal)
+                    .disabled(!canGetAdvice)
                 }
                 .padding(.vertical)
             }
             .navigationTitle("Дашборд")
-            .onChange(of: notificationManager.pendingLogWindow) { _, windowLabel in
-                guard let windowLabel else { return }
-                selectedSlotWindow = windowLabel
+            .onChange(of: notificationManager.pendingLogWindow) { _, value in
+                guard let value else { return }
+                selectedWindow = value
                 logText = ""
                 notificationManager.pendingLogWindow = nil
             }
-            .onChange(of: notificationManager.pendingSkipWindow) { _, windowLabel in
-                guard let windowLabel else { return }
-                createSkippedEvent(windowLabel: windowLabel)
+            .onChange(of: notificationManager.pendingSkipWindow) { _, value in
+                guard let value else { return }
+                createSkippedEvent(windowLabel: value)
                 notificationManager.pendingSkipWindow = nil
             }
-            .sheet(item: selectedSlotWindowBinding) { windowLabel in
-                LogSheetView(
-                    windowLabel: windowLabel,
-                    logText: $logText,
-                    onSaveRaw: {
-                        saveMealEvent(windowLabel: windowLabel)
-                        selectedSlotWindow = nil
-                    },
-                    onSaveStructured: { ingredients in
-                        saveStructuredEvent(windowLabel: windowLabel, ingredients: ingredients)
-                        selectedSlotWindow = nil
-                    }
-                )
+            .sheet(item: selectedWindowBinding) { window in
+                LogSheetView(windowLabel: window, logText: $logText) {
+                    saveMealEvent(windowLabel: window)
+                    selectedWindow = nil
+                }
             }
             .sheet(item: $editingEvent) { event in
                 MealEventEditorView(event: event)
@@ -101,75 +82,17 @@ struct DashboardView: View {
         }
     }
 
-    private var selectedSlotWindowBinding: Binding<String?> {
-        Binding(
-            get: { selectedSlotWindow },
-            set: { selectedSlotWindow = $0 }
-        )
-    }
-
-    @ViewBuilder
-    private var actionButtons: some View {
-        VStack(spacing: 12) {
-            Button {
-                processAllRawEvents()
-            } label: {
-                HStack {
-                    Image(systemName: "wand.and.stars")
-                    Text("Обработать всё")
-                }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(hasRawEvents ? Color.orange : Color.gray.opacity(0.3))
-                .foregroundColor(.white)
-                .cornerRadius(12)
-            }
-            .disabled(!hasRawEvents)
-
-            Button {
-                requestDailyAdvice()
-            } label: {
-                HStack {
-                    Image(systemName: "sparkles")
-                    Text("Совет дня")
-                }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(canGetAdvice ? Color.green : Color.gray.opacity(0.3))
-                .foregroundColor(.white)
-                .cornerRadius(12)
-            }
-            .disabled(!canGetAdvice)
-        }
-        .padding(.horizontal)
-    }
-
-    private var hasRawEvents: Bool {
-        todayEvents.contains { $0.status == .raw }
+    private var selectedWindowBinding: Binding<String?> {
+        .init(get: { selectedWindow }, set: { selectedWindow = $0 })
     }
 
     private var canGetAdvice: Bool {
-        let relevantWindows = windows.map(\.name)
-        let relevantEvents = todayEvents.filter { relevantWindows.contains($0.windowLabel) }
-
-        for window in relevantWindows {
-            guard let event = relevantEvents.first(where: { $0.windowLabel == window }) else {
-                return false
-            }
-            if event.status != .structured && event.status != .skipped {
-                return false
-            }
+        let labels = windows.map(\.name)
+        guard !labels.isEmpty else { return false }
+        return labels.allSatisfy { label in
+            guard let event = latestEvent(for: label) else { return false }
+            return event.status == .structured || event.status == .skipped
         }
-
-        return !relevantWindows.isEmpty
-    }
-
-    private func canRequestRecommendation(for windowLabel: String) -> Bool {
-        let currentEvent = todayEvents.first(where: { $0.windowLabel == windowLabel })
-        guard currentEvent == nil || currentEvent?.status == .empty else {
-            return false
-        }
-        return todayEvents.contains { $0.status == .structured }
     }
 
     private func saveMealEvent(windowLabel: String) {
@@ -178,240 +101,132 @@ struct DashboardView: View {
 
         clearRecommendationCacheForToday()
 
-        let event = MealEvent(
-            windowLabel: windowLabel,
-            status: .raw,
-            rawText: text
-        )
-        modelContext.insert(event)
+        let event: MealEvent
+        if let existing = latestEvent(for: windowLabel) {
+            event = existing
+            event.rawText = text
+            event.status = .pendingEstimation
+            event.parseErrorSummary = nil
+            event.memoryApplied = false
+            print("Meal upsert: update existing event for \(windowLabel), id=\(existing.persistentModelID)")
+        } else {
+            let created = MealEvent(windowLabel: windowLabel, status: .pendingEstimation, rawText: text)
+            modelContext.insert(created)
+            event = created
+            print("Meal upsert: create new event for \(windowLabel), id=\(created.persistentModelID)")
+        }
         try? modelContext.save()
 
         Task {
-            await structurizeEvent(event)
+            await estimate(event: event, replacingExistingItems: true)
         }
     }
 
-    private func saveStructuredEvent(windowLabel: String, ingredients: [StructuredIngredientDraft]) {
-        guard !ingredients.isEmpty else { return }
+    @MainActor
+    private func estimate(event: MealEvent, replacingExistingItems: Bool) async {
+        guard let text = event.rawText, !text.isEmpty else { return }
 
-        clearRecommendationCacheForToday()
+        let fingerprint = normalizedFingerprint(from: text)
+        let memory = findMemory(for: fingerprint)
 
-        let event = MealEvent(windowLabel: windowLabel, status: .structured)
-        modelContext.insert(event)
+        do {
+            let result = try await LLMClient.estimateMeal(text: text)
 
-        for item in ingredients {
-            let ingredient = Ingredient(
-                name: item.name,
-                amount: item.amount,
-                unit: item.unit,
-                calories: item.calories,
-                proteins: item.proteins,
-                fats: item.fats,
-                carbs: item.carbs
-            )
-            ingredient.mealEvent = event
-            modelContext.insert(ingredient)
-        }
+            if replacingExistingItems {
+                EstimationRuntime.overwriteSnapshot(
+                    event: event,
+                    with: result.parsed.items,
+                    mode: result.parsed.mode,
+                    modelContext: modelContext
+                )
+            }
 
-        event.recalculateAggregates()
-        try? modelContext.save()
-    }
+            let totals = EstimationRuntime.applyMemoryPrior(totals: result.parsed.totals, memory: memory)
 
-    private func clearRecommendationCacheForToday() {
-        let dateKey = DailyAdvice.dateKey(from: Date())
-        let descriptor = FetchDescriptor<Recommendation>(
-            predicate: #Predicate { $0.date == dateKey }
-        )
-        if let existing = try? modelContext.fetch(descriptor).first {
-            modelContext.delete(existing)
+            event.applyTotals(calories: totals.calories, proteins: totals.proteins, fats: totals.fats, carbs: totals.carbs)
+            event.status = .structured
+            event.confidence = result.parsed.confidence
+            event.sourceMode = result.parsed.mode == "ingredient_breakdown" ? .ingredientBreakdown : .compositeItem
+            event.modelId = result.parsed.modelId
+            event.promptVersion = result.parsed.promptVersion
+            event.estimationSchemaVersion = result.parsed.estimationSchemaVersion
+            event.rawPayload = result.rawPayload
+            event.rawPayloadCreatedAt = Date()
+            event.parseErrorSummary = nil
+            event.memoryApplied = memory != nil
             try? modelContext.save()
+            print("Meal estimate saved: \(event.windowLabel), status=\(event.status.rawValue), kcal=\(event.calories)")
+        } catch {
+            event.status = .parseFailed
+            event.parseErrorSummary = error.localizedDescription
+            event.rawPayloadCreatedAt = Date()
+            try? modelContext.save()
+            print("Meal estimate failed: \(event.windowLabel), error=\(error.localizedDescription)")
         }
     }
 
     private func createSkippedEvent(windowLabel: String) {
-        let existing = todayEvents.first(where: { $0.windowLabel == windowLabel })
-        guard existing == nil else { return }
-
+        guard latestEvent(for: windowLabel) == nil else { return }
         clearRecommendationCacheForToday()
 
-        let event = MealEvent(
-            windowLabel: windowLabel,
-            status: .skipped
-        )
+        let event = MealEvent(windowLabel: windowLabel, status: .skipped)
         modelContext.insert(event)
         try? modelContext.save()
     }
 
-    private func structurizeEvent(_ event: MealEvent) async {
-        guard let text = event.rawText else { return }
-
-        do {
-            let results = try await LLMClient.structurize(text: text)
-
-            for item in results {
-                let foodItem = findFoodItem(name: item.name)
-                let ingredient = Ingredient(
-                    name: item.name,
-                    amount: item.amount,
-                    unit: item.unit,
-                    calories: (foodItem?.calories ?? 0) * item.amount / 100,
-                    proteins: (foodItem?.proteins ?? 0) * item.amount / 100,
-                    fats: (foodItem?.fats ?? 0) * item.amount / 100,
-                    carbs: (foodItem?.carbs ?? 0) * item.amount / 100
-                )
-                ingredient.mealEvent = event
-                modelContext.insert(ingredient)
-            }
-
-            event.recalculateAggregates()
-            event.status = .structured
-            try modelContext.save()
-        } catch {
-            print("Structurize error: \(error)")
-        }
-    }
-
-    private func findFoodItem(name: String) -> FoodItem? {
-        var descriptor = FetchDescriptor<FoodItem>(
-            predicate: #Predicate { $0.name.localizedStandardContains(name) }
-        )
-        descriptor.fetchLimit = 1
-        return try? modelContext.fetch(descriptor).first
-    }
-
-    private func processAllRawEvents() {
-        let rawEvents = todayEvents.filter { $0.status == .raw }
-        guard !rawEvents.isEmpty else { return }
-
-        Task {
-            let texts = rawEvents.compactMap(\.rawText)
-            do {
-                let results = try await LLMClient.batchStructurize(texts: texts)
-                for (index, event) in rawEvents.enumerated() {
-                    guard index < results.count else { break }
-                    for item in results[index] {
-                        let foodItem = findFoodItem(name: item.name)
-                        let ingredient = Ingredient(
-                            name: item.name,
-                            amount: item.amount,
-                            unit: item.unit,
-                            calories: (foodItem?.calories ?? 0) * item.amount / 100,
-                            proteins: (foodItem?.proteins ?? 0) * item.amount / 100,
-                            fats: (foodItem?.fats ?? 0) * item.amount / 100,
-                            carbs: (foodItem?.carbs ?? 0) * item.amount / 100
-                        )
-                        ingredient.mealEvent = event
-                        modelContext.insert(ingredient)
-                    }
-                    event.recalculateAggregates()
-                    event.status = .structured
-                }
-                try modelContext.save()
-            } catch {
-                print("Batch structurize error: \(error)")
-            }
-        }
-    }
-
-    private func requestRecommendation(for windowLabel: String) {
-        let relevantWindows = windows.map(\.name)
-        let todayRelevantEvents = todayEvents.filter { relevantWindows.contains($0.windowLabel) }
-
-        let eatenMeals = todayRelevantEvents
-            .filter { $0.status == .structured }
-            .map { ($0.windowLabel, $0.calories, $0.proteins, $0.fats, $0.carbs) }
-
-        let remainingWindows = relevantWindows.filter { label in
-            todayRelevantEvents.first(where: { $0.windowLabel == label }) == nil
-        }
-
-        guard eatenMeals.count > 0, remainingWindows.contains(windowLabel) else {
-            return
-        }
-
-        let goalCalories = UserDefaults.standard.double(forKey: "goal_calories")
-
-        Task {
-            do {
-                let text = try await LLMClient.recommendation(
-                    eaten: eatenMeals,
-                    remainingWindows: remainingWindows,
-                    goalCalories: goalCalories
-                )
-
-                let dateKey = DailyAdvice.dateKey(from: Date())
-                let descriptor = FetchDescriptor<Recommendation>(
-                    predicate: #Predicate { $0.date == dateKey }
-                )
-
-                if let existing = try? modelContext.fetch(descriptor).first {
-                    existing.recommendationText = text
-                    existing.createdAt = Date()
-                } else {
-                    modelContext.insert(Recommendation(date: dateKey, recommendationText: text))
-                }
-                try modelContext.save()
-            } catch {
-                print("Recommendation error: \(error)")
-            }
+    private func clearRecommendationCacheForToday() {
+        let key = DailyAdvice.dateKey(from: Date())
+        let descriptor = FetchDescriptor<Recommendation>(predicate: #Predicate { $0.date == key })
+        if let rec = try? modelContext.fetch(descriptor).first {
+            modelContext.delete(rec)
+            try? modelContext.save()
         }
     }
 
     private func requestDailyAdvice() {
         let goalCalories = UserDefaults.standard.double(forKey: "goal_calories")
-        let relevantWindows = windows.map(\.name)
-        let todayRelevantEvents = todayEvents.filter { relevantWindows.contains($0.windowLabel) }
+        let labels = windows.map(\.name)
+        let events = todayEvents.filter { labels.contains($0.windowLabel) }
 
-        var meals: [(window: String, rawText: String?, ingredients: [LLMClient.IngredientResult], calories: Double, proteins: Double, fats: Double, carbs: Double)] = []
-        var skippedWindows: [String] = []
+        let meals = events
+            .filter { $0.status == .structured }
+            .map { ($0.windowLabel, $0.calories, $0.proteins, $0.fats, $0.carbs) }
 
-        for window in relevantWindows {
-            if let event = todayRelevantEvents.first(where: { $0.windowLabel == window }) {
-                if event.status == .skipped {
-                    skippedWindows.append(window)
-                } else {
-                    let ingredients: [LLMClient.IngredientResult] = event.ingredients.map {
-                        LLMClient.IngredientResult(name: $0.name, amount: $0.amount, unit: $0.unit)
-                    }
-                    meals.append((
-                        window: window,
-                        rawText: event.rawText,
-                        ingredients: ingredients,
-                        calories: event.calories,
-                        proteins: event.proteins,
-                        fats: event.fats,
-                        carbs: event.carbs
-                    ))
-                }
-            }
-        }
+        let skipped = events.filter { $0.status == .skipped }.map(\.windowLabel)
 
         Task {
             do {
-                let advice = try await LLMClient.dailyAdvice(
-                    meals: meals,
-                    goalCalories: goalCalories,
-                    skippedWindows: skippedWindows
-                )
-
+                let advice = try await LLMClient.dailyAdvice(meals: meals, goalCalories: goalCalories, skippedWindows: skipped)
                 let dateKey = DailyAdvice.dateKey(from: Date())
-
-                if let existing = try? modelContext.fetch(
-                    FetchDescriptor<DailyAdvice>(
-                        predicate: #Predicate { $0.date == dateKey }
-                    )
-                ).first {
+                let descriptor = FetchDescriptor<DailyAdvice>(predicate: #Predicate { $0.date == dateKey })
+                if let existing = try? modelContext.fetch(descriptor).first {
                     existing.adviceText = advice
                     existing.createdAt = Date()
                 } else {
                     modelContext.insert(DailyAdvice(date: dateKey, adviceText: advice))
                 }
-
-                try modelContext.save()
+                try? modelContext.save()
             } catch {
                 print("Daily advice error: \(error)")
             }
         }
+    }
+
+    private func normalizedFingerprint(from text: String) -> String {
+        text.lowercased()
+            .replacingOccurrences(of: "[^a-zа-я0-9\\s]", with: " ", options: .regularExpression)
+            .split(separator: " ")
+            .sorted()
+            .joined(separator: " ")
+    }
+
+    private func findMemory(for fingerprint: String) -> EstimationMemory? {
+        let descriptor = FetchDescriptor<EstimationMemory>(predicate: #Predicate { $0.fingerprint == fingerprint })
+        return try? modelContext.fetch(descriptor).first
+    }
+
+    private func latestEvent(for windowLabel: String) -> MealEvent? {
+        todayEvents.first(where: { $0.windowLabel == windowLabel })
     }
 }
 
@@ -419,271 +234,173 @@ struct MealSlotCard: View {
     let windowLabel: String
     let timeRange: String
     let event: MealEvent?
-    let recommendationText: String?
-    let recommendationEnabled: Bool
-    let onTap: (MealEvent?) -> Void
-    let onRequestRecommendation: () -> Void
-
-    @State private var selectedTab = 0
+    let onTap: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(windowLabel)
-                    .font(.headline)
+                Text(windowLabel).font(.headline)
                 Spacer()
-                Text(timeRange)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                Text(timeRange).font(.caption).foregroundColor(.secondary)
             }
 
-            if let event = event {
-                Picker("", selection: $selectedTab) {
-                    Text("Лог").tag(0)
-                    Text("Рекомендация").tag(1)
-                }
-                .pickerStyle(.segmented)
-
-                if selectedTab == 0 {
-                    eventContent(event)
-                } else {
-                    recommendationContent
+            if let event {
+                switch event.status {
+                case .skipped:
+                    Label("Пропущено", systemImage: "slash.circle")
+                        .foregroundColor(.secondary)
+                case .pendingEstimation:
+                    Label(event.rawText ?? "Оценка...", systemImage: "clock")
+                        .foregroundColor(.orange)
+                case .parseFailed:
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(event.rawText ?? "")
+                        Text("Последняя оценка не обновлена")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    }
+                case .structured:
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(Int(event.calories)) ккал").font(.title3.bold())
+                        Text("Б: \(Int(event.proteins))г Ж: \(Int(event.fats))г У: \(Int(event.carbs))г")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        if let confidence = event.confidence {
+                            Text("Уверенность: \(confidence)")
+                                .font(.caption2)
+                                .foregroundColor(confidence == "low" ? .orange : .secondary)
+                        }
+                        if event.memoryApplied {
+                            Text("Применена память прошлых правок")
+                                .font(.caption2)
+                                .foregroundColor(.blue)
+                        }
+                        ForEach(event.estimateItems.prefix(3), id: \.persistentModelID) { item in
+                            HStack {
+                                Text(item.name).font(.caption)
+                                Spacer()
+                                Text("\(Int(item.estimatedCalories)) ккал").font(.caption2)
+                            }
+                            .foregroundColor(item.highCalorieFlag ? .red : .secondary)
+                        }
+                    }
+                case .empty:
+                    EmptyView()
                 }
             } else {
-                emptyContent
+                Label("Записать приём пищи", systemImage: "plus.circle")
+                    .foregroundColor(.secondary)
             }
         }
         .padding()
         .background(backgroundColor)
         .cornerRadius(12)
         .contentShape(Rectangle())
-        .onTapGesture {
-            onTap(event)
-        }
+        .onTapGesture(perform: onTap)
     }
 
     private var backgroundColor: Color {
-        guard let event = event else { return Color.gray.opacity(0.15) }
+        guard let event else { return Color.gray.opacity(0.15) }
         switch event.status {
         case .empty: return Color.gray.opacity(0.15)
-        case .raw: return Color.yellow.opacity(0.2)
+        case .pendingEstimation: return Color.yellow.opacity(0.2)
         case .structured: return Color.green.opacity(0.2)
+        case .parseFailed: return Color.orange.opacity(0.2)
         case .skipped: return Color.gray.opacity(0.15)
-        }
-    }
-
-    @ViewBuilder
-    private var emptyContent: some View {
-        HStack {
-            Image(systemName: "plus.circle")
-                .foregroundColor(.secondary)
-            Text("Записать приём пищи")
-                .foregroundColor(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    @ViewBuilder
-    private func eventContent(_ event: MealEvent) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if event.status == .skipped {
-                HStack {
-                    Image(systemName: "slash.circle")
-                        .foregroundColor(.secondary)
-                    Text("Пропущено")
-                        .foregroundColor(.secondary)
-                }
-            } else if event.status == .raw {
-                HStack {
-                    Text(event.rawText ?? "")
-                        .font(.subheadline)
-                    Spacer()
-                    Image(systemName: "clock")
-                        .foregroundColor(.orange)
-                        .font(.caption)
-                }
-            } else if event.status == .structured {
-                Text("\(Int(event.calories)) ккал")
-                    .font(.title3.bold())
-                Text("Б: \(Int(event.proteins))г  Ж: \(Int(event.fats))г  У: \(Int(event.carbs))г")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                if !event.ingredients.isEmpty {
-                    Text(event.ingredients.map { $0.name }.joined(separator: ", "))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    @ViewBuilder
-    private var recommendationContent: some View {
-        VStack(spacing: 8) {
-            if let recommendationText, !recommendationText.isEmpty {
-                Text(recommendationText)
-                    .font(.subheadline)
-                    .foregroundColor(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                Text("Получите рекомендацию для оставшихся приёмов")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-            }
-
-            Button {
-                onRequestRecommendation()
-            } label: {
-                HStack {
-                    Image(systemName: "sparkles")
-                    Text("Получить рекомендацию")
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(recommendationEnabled ? Color.blue.opacity(0.1) : Color.gray.opacity(0.2))
-                .foregroundColor(recommendationEnabled ? .blue : .secondary)
-                .cornerRadius(8)
-            }
-            .disabled(!recommendationEnabled)
         }
     }
 }
 
 struct MealEventEditorView: View {
+    private struct ItemDraft: Identifiable {
+        let id: PersistentIdentifier
+        let item: EstimateItem
+        var calories: String
+        var proteins: String
+        var fats: String
+        var carbs: String
+    }
+
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
-    @Query(sort: \FoodItem.name) private var foodItems: [FoodItem]
 
     let event: MealEvent
 
-    @State private var rawTextDraft: String = ""
-    @State private var ingredientQuery = ""
-    @State private var selectedFoodName = ""
-    @State private var newAmount = "100"
-    @State private var templateName = ""
-    @State private var llmInputText = ""
-    @State private var isProcessingLLM = false
-    @State private var llmError = ""
+    @State private var textDraft = ""
+    @State private var isSubmitting = false
+    @State private var errorText = ""
+    @State private var itemDrafts: [ItemDraft] = []
 
     var body: some View {
         NavigationStack {
             Form {
-                if event.status == .raw {
-                    Section("Текст") {
-                        TextField("Что съели?", text: $rawTextDraft, axis: .vertical)
-                            .lineLimit(3...6)
+                Section("Текст") {
+                    TextField("Что съели?", text: $textDraft, axis: .vertical)
+                        .lineLimit(3...8)
+                }
 
-                        Button("Сохранить") {
-                            event.rawText = rawTextDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-                            try? modelContext.save()
-                            dismiss()
-                        }
-                        .disabled(rawTextDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-
-                    Section("Обработка LLM") {
-                        TextField("Текст для структуризации", text: $llmInputText, axis: .vertical)
-                            .lineLimit(3...6)
-                        if !llmError.isEmpty {
-                            Text(llmError)
-                                .font(.caption)
-                                .foregroundColor(.red)
-                        }
-                        Button(isProcessingLLM ? "Обрабатываю..." : "Обработать") {
-                            processLLMText()
-                        }
-                        .disabled(isProcessingLLM || llmInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if event.status == .structured && EstimationRuntime.lowConfidenceWarningVisible(event.confidence) {
+                    Section {
+                        Text("Оценка с низкой уверенностью. Можно уточнить текст.")
+                            .font(.caption)
+                            .foregroundColor(.orange)
                     }
                 }
 
-                if event.status == .structured {
-                    Section("Переобработать через LLM") {
-                        TextField("Текст для структуризации", text: $llmInputText, axis: .vertical)
-                            .lineLimit(3...6)
-                        if !llmError.isEmpty {
-                            Text(llmError)
-                                .font(.caption)
-                                .foregroundColor(.red)
-                        }
-                        Button(isProcessingLLM ? "Обрабатываю..." : "Обработать заново") {
-                            processLLMText()
-                        }
-                        .disabled(isProcessingLLM || llmInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if !errorText.isEmpty {
+                    Section {
+                        Text(errorText).foregroundColor(.red)
                     }
+                }
 
-                    Section("Ингредиенты") {
-                        if event.ingredients.isEmpty {
-                            Text("Нет ингредиентов")
-                                .foregroundColor(.secondary)
-                        } else {
-                            ForEach(event.ingredients) { ingredient in
+                Section("Ручная корректировка по позициям") {
+                    if itemDrafts.isEmpty {
+                        Text("Нет позиций для редактирования. Сначала выполните оценку.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else {
+                        ForEach($itemDrafts) { $draft in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(draft.item.name).font(.subheadline.bold())
                                 HStack {
-                                    VStack(alignment: .leading) {
-                                        Text(ingredient.name)
-                                        Text("\(Int(ingredient.calories)) ккал")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    Spacer()
-                                    TextField("Кол-во", value: Binding(
-                                        get: { ingredient.amount },
-                                        set: { newValue in
-                                            updateIngredient(ingredient, amount: newValue)
-                                        }
-                                    ), format: .number)
-                                    .keyboardType(.decimalPad)
-                                    .multilineTextAlignment(.trailing)
-                                    .frame(width: 64)
-                                    Text(ingredient.unit)
-                                        .foregroundColor(.secondary)
+                                    TextField("ккал", text: $draft.calories).keyboardType(.decimalPad)
+                                    TextField("Б", text: $draft.proteins).keyboardType(.decimalPad)
+                                    TextField("Ж", text: $draft.fats).keyboardType(.decimalPad)
+                                    TextField("У", text: $draft.carbs).keyboardType(.decimalPad)
                                 }
                             }
-                            .onDelete(perform: deleteIngredients)
-                        }
-                    }
-
-                    Section("Добавить из справочника") {
-                        TextField("Поиск", text: $ingredientQuery)
-
-                        Picker("Продукт", selection: $selectedFoodName) {
-                            Text("Выберите продукт").tag("")
-                            ForEach(filteredFoods, id: \.name) { item in
-                                Text(item.name).tag(item.name)
-                            }
                         }
 
-                        TextField("Количество", text: $newAmount)
-                            .keyboardType(.decimalPad)
-
-                        Button("Добавить") {
-                            addIngredientFromFood()
+                        Button("Применить коррекцию") {
+                            applyManualCorrection()
                         }
-                        .disabled(selectedFoodName.isEmpty || Double(newAmount) == nil)
-                    }
-
-                    Section("Шаблон") {
-                        TextField("Название шаблона", text: $templateName)
-                        Button("Сохранить как шаблон") {
-                            saveAsTemplate()
-                        }
-                        .disabled(templateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || event.ingredients.isEmpty)
+                        .disabled(!areItemDraftsValid)
                     }
                 }
 
-                if event.status == .skipped {
-                    Section {
-                        Text("Пропущенный приём не редактируется")
-                            .foregroundColor(.secondary)
+                Section {
+                    Button(isSubmitting ? "Отправка..." : "Сохранить и переоценить") {
+                        reestimate()
                     }
+                    .disabled(isSubmitting || textDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
             .navigationTitle(event.windowLabel)
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
-                rawTextDraft = event.rawText ?? ""
-                llmInputText = event.rawText ?? ""
+                textDraft = event.rawText ?? ""
+                itemDrafts = event.estimateItems
+                    .sorted { $0.estimatedCalories > $1.estimatedCalories }
+                    .map { item in
+                        ItemDraft(
+                            id: item.persistentModelID,
+                            item: item,
+                            calories: String(Int(item.estimatedCalories)),
+                            proteins: String(Int(item.estimatedProteins)),
+                            fats: String(Int(item.estimatedFats)),
+                            carbs: String(Int(item.estimatedCarbs))
+                        )
+                    }
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -693,239 +410,167 @@ struct MealEventEditorView: View {
         }
     }
 
-    private var filteredFoods: [FoodItem] {
-        let q = ingredientQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return Array(foodItems.prefix(30)) }
-        return foodItems.filter { $0.name.localizedCaseInsensitiveContains(q) }.prefix(30).map { $0 }
-    }
-
-    private func updateIngredient(_ ingredient: Ingredient, amount: Double) {
-        guard let food = foodItems.first(where: { $0.name.localizedCaseInsensitiveContains(ingredient.name) }) else {
-            ingredient.amount = amount
-            event.recalculateAggregates()
-            try? modelContext.save()
-            return
-        }
-
-        ingredient.amount = amount
-        ingredient.calories = food.calories * amount / 100
-        ingredient.proteins = food.proteins * amount / 100
-        ingredient.fats = food.fats * amount / 100
-        ingredient.carbs = food.carbs * amount / 100
-        event.recalculateAggregates()
-        try? modelContext.save()
-    }
-
-    private func deleteIngredients(at offsets: IndexSet) {
-        for index in offsets {
-            let ingredient = event.ingredients[index]
-            modelContext.delete(ingredient)
-        }
-        event.recalculateAggregates()
-        try? modelContext.save()
-    }
-
-    private func addIngredientFromFood() {
-        guard
-            let food = foodItems.first(where: { $0.name == selectedFoodName }),
-            let amount = Double(newAmount)
-        else {
-            return
-        }
-
-        let ingredient = Ingredient(
-            name: food.name,
-            amount: amount,
-            unit: "г",
-            calories: food.calories * amount / 100,
-            proteins: food.proteins * amount / 100,
-            fats: food.fats * amount / 100,
-            carbs: food.carbs * amount / 100
-        )
-        ingredient.mealEvent = event
-        modelContext.insert(ingredient)
-        event.recalculateAggregates()
-        try? modelContext.save()
-
-        selectedFoodName = ""
-        newAmount = "100"
-    }
-
-    private func saveAsTemplate() {
-        let name = templateName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
-
-        let descriptor = FetchDescriptor<MealTemplate>(
-            predicate: #Predicate { $0.name == name }
-        )
-
-        let template: MealTemplate
-        if let existing = try? modelContext.fetch(descriptor).first {
-            for ingredient in existing.ingredients {
-                modelContext.delete(ingredient)
-            }
-            template = existing
-        } else {
-            template = MealTemplate(name: name)
-            modelContext.insert(template)
-        }
-
-        for source in event.ingredients {
-            let copy = TemplateIngredient(
-                name: source.name,
-                amount: source.amount,
-                unit: source.unit,
-                calories: source.calories,
-                proteins: source.proteins,
-                fats: source.fats,
-                carbs: source.carbs
-            )
-            copy.template = template
-            modelContext.insert(copy)
-        }
-
-        try? modelContext.save()
-    }
-
-    private func processLLMText() {
-        let text = llmInputText.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func reestimate() {
+        let text = textDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
-        isProcessingLLM = true
-        llmError = ""
+        isSubmitting = true
+        errorText = ""
+
+        let oldTotals = (event.calories, event.proteins, event.fats, event.carbs)
+        let oldItems = event.estimateItems
+
+        event.rawText = text
+        event.status = .pendingEstimation
+        try? modelContext.save()
 
         Task {
             do {
-                let items = try await LLMClient.structurize(text: text)
+                let result = try await LLMClient.estimateMeal(text: text)
+
                 await MainActor.run {
-                    for ingredient in event.ingredients {
-                        modelContext.delete(ingredient)
-                    }
+                    _ = oldItems
+                    EstimationRuntime.overwriteSnapshot(
+                        event: event,
+                        with: result.parsed.items,
+                        mode: result.parsed.mode,
+                        modelContext: modelContext
+                    )
 
-                    for item in items {
-                        let food = findFoodItem(name: item.name)
-                        let ingredient = Ingredient(
-                            name: item.name,
-                            amount: item.amount,
-                            unit: item.unit,
-                            calories: (food?.calories ?? 0) * item.amount / 100,
-                            proteins: (food?.proteins ?? 0) * item.amount / 100,
-                            fats: (food?.fats ?? 0) * item.amount / 100,
-                            carbs: (food?.carbs ?? 0) * item.amount / 100
-                        )
-                        ingredient.mealEvent = event
-                        modelContext.insert(ingredient)
-                    }
-
-                    event.rawText = text
+                    event.applyTotals(
+                        calories: result.parsed.totals.calories,
+                        proteins: result.parsed.totals.proteins,
+                        fats: result.parsed.totals.fats,
+                        carbs: result.parsed.totals.carbs
+                    )
                     event.status = .structured
-                    event.recalculateAggregates()
+                    event.confidence = result.parsed.confidence
+                    event.sourceMode = result.parsed.mode == "ingredient_breakdown" ? .ingredientBreakdown : .compositeItem
+                    event.modelId = result.parsed.modelId
+                    event.promptVersion = result.parsed.promptVersion
+                    event.estimationSchemaVersion = result.parsed.estimationSchemaVersion
+                    event.rawPayload = result.rawPayload
+                    event.rawPayloadCreatedAt = Date()
+                    event.parseErrorSummary = nil
                     try? modelContext.save()
-                    isProcessingLLM = false
-                    llmInputText = text
+                    isSubmitting = false
+                    dismiss()
                 }
             } catch {
                 await MainActor.run {
-                    llmError = error.localizedDescription
-                    isProcessingLLM = false
+                    event.status = .parseFailed
+                    event.parseErrorSummary = error.localizedDescription
+                    event.applyTotals(calories: oldTotals.0, proteins: oldTotals.1, fats: oldTotals.2, carbs: oldTotals.3)
+                    try? modelContext.save()
+                    errorText = "Не удалось обновить оценку. Исправьте текст и попробуйте снова."
+                    isSubmitting = false
                 }
             }
         }
     }
 
-    private func findFoodItem(name: String) -> FoodItem? {
-        foodItems.first { item in
-            item.name.localizedCaseInsensitiveContains(name) || name.localizedCaseInsensitiveContains(item.name)
+    private func applyManualCorrection() {
+        guard areItemDraftsValid else { return }
+
+        for draft in itemDrafts {
+            guard
+                let calories = Double(draft.calories),
+                let proteins = Double(draft.proteins),
+                let fats = Double(draft.fats),
+                let carbs = Double(draft.carbs)
+            else {
+                continue
+            }
+
+            draft.item.estimatedCalories = calories
+            draft.item.estimatedProteins = proteins
+            draft.item.estimatedFats = fats
+            draft.item.estimatedCarbs = carbs
+
+        }
+
+        let totals = EstimationRuntime.aggregateTotals(items: event.estimateItems)
+
+        event.applyTotals(calories: totals.calories, proteins: totals.proteins, fats: totals.fats, carbs: totals.carbs)
+        event.memoryApplied = false
+        saveMemoryPrior(
+            for: event.rawText ?? "",
+            calories: totals.calories,
+            proteins: totals.proteins,
+            fats: totals.fats,
+            carbs: totals.carbs
+        )
+        try? modelContext.save()
+    }
+
+    private var areItemDraftsValid: Bool {
+        !itemDrafts.isEmpty && itemDrafts.allSatisfy {
+            Double($0.calories) != nil &&
+            Double($0.proteins) != nil &&
+            Double($0.fats) != nil &&
+            Double($0.carbs) != nil
+        }
+    }
+
+    private func saveMemoryPrior(for text: String, calories: Double, proteins: Double, fats: Double, carbs: Double) {
+        let fingerprint = text.lowercased()
+            .replacingOccurrences(of: "[^a-zа-я0-9\\s]", with: " ", options: .regularExpression)
+            .split(separator: " ")
+            .sorted()
+            .joined(separator: " ")
+        guard !fingerprint.isEmpty else { return }
+
+        let descriptor = FetchDescriptor<EstimationMemory>(
+            predicate: #Predicate { $0.fingerprint == fingerprint }
+        )
+        if let existing = try? modelContext.fetch(descriptor).first {
+            existing.calories = calories
+            existing.proteins = proteins
+            existing.fats = fats
+            existing.carbs = carbs
+            existing.updatedAt = Date()
+        } else {
+            modelContext.insert(
+                EstimationMemory(
+                    fingerprint: fingerprint,
+                    calories: calories,
+                    proteins: proteins,
+                    fats: fats,
+                    carbs: carbs
+                )
+            )
         }
     }
 }
 
 struct LogSheetView: View {
-    @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
-    @Query(sort: \MealEvent.timestamp, order: .reverse) private var recentEvents: [MealEvent]
-    @Query(sort: \MealTemplate.name) private var templates: [MealTemplate]
 
     let windowLabel: String
     @Binding var logText: String
-    let onSaveRaw: () -> Void
-    let onSaveStructured: ([StructuredIngredientDraft]) -> Void
+    let onSave: () -> Void
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Лог") {
-                    TextField("Что съели?", text: $logText, axis: .vertical)
-                        .lineLimit(4...8)
+            VStack(spacing: 16) {
+                TextField("Что съели?", text: $logText, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(4...8)
 
-                    Button("Готово") {
-                        onSaveRaw()
-                        dismiss()
-                    }
-                    .disabled(logText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Готово") {
+                    onSave()
+                    dismiss()
                 }
+                .disabled(logText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(logText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Color.gray : Color.blue)
+                .foregroundColor(.white)
+                .cornerRadius(12)
 
-                Section("Из истории") {
-                    if historyCandidates.isEmpty {
-                        Text("Нет сохранённых приёмов")
-                            .foregroundColor(.secondary)
-                    } else {
-                        ForEach(historyCandidates) { event in
-                            Button {
-                                let copied = event.ingredients.map {
-                                    StructuredIngredientDraft(
-                                        name: $0.name,
-                                        amount: $0.amount,
-                                        unit: $0.unit,
-                                        calories: $0.calories,
-                                        proteins: $0.proteins,
-                                        fats: $0.fats,
-                                        carbs: $0.carbs
-                                    )
-                                }
-                                onSaveStructured(copied)
-                                dismiss()
-                            } label: {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(event.windowLabel)
-                                        .font(.subheadline.bold())
-                                    Text(event.ingredients.map { $0.name }.joined(separator: ", "))
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(1)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Section("Шаблоны") {
-                    if templates.isEmpty {
-                        Text("Нет шаблонов")
-                            .foregroundColor(.secondary)
-                    } else {
-                        ForEach(templates) { template in
-                            Button {
-                                let copied = template.ingredients.map {
-                                    StructuredIngredientDraft(
-                                        name: $0.name,
-                                        amount: $0.amount,
-                                        unit: $0.unit,
-                                        calories: $0.calories,
-                                        proteins: $0.proteins,
-                                        fats: $0.fats,
-                                        carbs: $0.carbs
-                                    )
-                                }
-                                onSaveStructured(copied)
-                                dismiss()
-                            } label: {
-                                Text(template.name)
-                            }
-                        }
-                    }
-                }
+                Spacer()
             }
+            .padding()
             .navigationTitle(windowLabel)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -934,13 +579,6 @@ struct LogSheetView: View {
                 }
             }
         }
-    }
-
-    private var historyCandidates: [MealEvent] {
-        recentEvents
-            .filter { $0.status == .structured && !$0.ingredients.isEmpty }
-            .prefix(5)
-            .map { $0 }
     }
 }
 

@@ -3,29 +3,107 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 60;
+	objectVersion = 71;
 	objects = {
 
 /* Begin PBXBuildFile section */
 		A1B2C3D4E5F6A1B2C3D4E5F6 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C1B2C3D4E5F6C1B2C3D4E5F2 /* SwiftUI.framework */; };
 		A1B2C3D4E5F6A1B2C3D4E5F7 /* SwiftData.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C1B2C3D4E5F6C1B2C3D4E5F3 /* SwiftData.framework */; };
+		A37C8BC8F5E2A6888498FE23 /* LLMContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F4EBF740500E7FE5EAA5321 /* LLMContractTests.swift */; };
+		BC04277FC6CB662D48FAE065 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7EB94E6B0F1C758B723F72BB /* Foundation.framework */; };
+		CC0E10A757F9FE93365DCE4F /* EstimationRuntimeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C05712DB950A201BBFA95FD /* EstimationRuntimeTests.swift */; };
+		CC5911171461B1AA3971586D /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 569718750664E9C30CC461F1 /* XCTest.framework */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		4EEEE1C3B2FCA6A3A3DE8A11 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 11B2C3D4E5F611B2C3D4E5F1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F1B2C3D4E5F6F1B2C3D4E5F1;
+			remoteInfo = LifeAdvisorApp;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		569718750664E9C30CC461F1 /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/XCTest.framework; sourceTree = DEVELOPER_DIR; };
+		7C05712DB950A201BBFA95FD /* EstimationRuntimeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EstimationRuntimeTests.swift; path = LifeAdvisorAppTests/EstimationRuntimeTests.swift; sourceTree = "<group>"; };
+		7EB94E6B0F1C758B723F72BB /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		8F4EBF740500E7FE5EAA5321 /* LLMContractTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LLMContractTests.swift; path = LifeAdvisorAppTests/LLMContractTests.swift; sourceTree = "<group>"; };
 		C1B2C3D4E5F6C1B2C3D4E5F1 /* LifeAdvisorApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LifeAdvisorApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C1B2C3D4E5F6C1B2C3D4E5F2 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		C1B2C3D4E5F6C1B2C3D4E5F3 /* SwiftData.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftData.framework; path = System/Library/Frameworks/SwiftData.framework; sourceTree = SDKROOT; };
+		C7CF923BC3998E8CDF650C05 /* LifeAdvisorAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LifeAdvisorAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		B1B2C3D4E5F6B1B2C3D4E5F1 /* App */ = {isa = PBXFileSystemSynchronizedRootGroup; path = App; sourceTree = "<group>"; };
-		B1B2C3D4E5F6B1B2C3D4E5F2 /* Models */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Models; sourceTree = "<group>"; };
-		B1B2C3D4E5F6B1B2C3D4E5F3 /* Views */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Views; sourceTree = "<group>"; };
-		B1B2C3D4E5F6B1B2C3D4E5F4 /* Services */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Services; sourceTree = "<group>"; };
-		B1B2C3D4E5F6B1B2C3D4E5F5 /* Resources */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Resources; sourceTree = "<group>"; };
+		B1B2C3D4E5F6B1B2C3D4E5F1 /* App */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
+			explicitFileTypes = {
+			};
+			explicitFolders = (
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		B1B2C3D4E5F6B1B2C3D4E5F2 /* Models */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
+			explicitFileTypes = {
+			};
+			explicitFolders = (
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		B1B2C3D4E5F6B1B2C3D4E5F3 /* Views */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
+			explicitFileTypes = {
+			};
+			explicitFolders = (
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		B1B2C3D4E5F6B1B2C3D4E5F4 /* Services */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
+			explicitFileTypes = {
+			};
+			explicitFolders = (
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		B1B2C3D4E5F6B1B2C3D4E5F5 /* Resources */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
+			explicitFileTypes = {
+			};
+			explicitFolders = (
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		20400DD26F3F71D78DE58ED4 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BC04277FC6CB662D48FAE065 /* Foundation.framework in Frameworks */,
+				CC5911171461B1AA3971586D /* XCTest.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		D1B2C3D4E5F6D1B2C3D4E5F1 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -38,11 +116,40 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		0E4981F232CFFDCB0D0C2626 /* LifeAdvisorAppTests */ = {
+			isa = PBXGroup;
+			children = (
+				8F4EBF740500E7FE5EAA5321 /* LLMContractTests.swift */,
+				7C05712DB950A201BBFA95FD /* EstimationRuntimeTests.swift */,
+			);
+			name = LifeAdvisorAppTests;
+			sourceTree = "<group>";
+		};
+		2C068EC42FA66FE200F6417C /* Recovered References */ = {
+			isa = PBXGroup;
+			children = (
+				C1B2C3D4E5F6C1B2C3D4E5F2 /* SwiftUI.framework */,
+				C1B2C3D4E5F6C1B2C3D4E5F3 /* SwiftData.framework */,
+			);
+			name = "Recovered References";
+			sourceTree = "<group>";
+		};
+		981F30F5C5BC3D627B1124B5 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				F7AC31FA84B00F7369069285 /* iOS */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		E1B2C3D4E5F6E1B2C3D4E5F1 = {
 			isa = PBXGroup;
 			children = (
 				E1B2C3D4E5F6E1B2C3D4E5F2 /* LifeAdvisorApp */,
 				E1B2C3D4E5F6E1B2C3D4E5F3 /* Products */,
+				2C068EC42FA66FE200F6417C /* Recovered References */,
+				981F30F5C5BC3D627B1124B5 /* Frameworks */,
+				0E4981F232CFFDCB0D0C2626 /* LifeAdvisorAppTests */,
 			);
 			sourceTree = "<group>";
 		};
@@ -62,13 +169,41 @@
 			isa = PBXGroup;
 			children = (
 				C1B2C3D4E5F6C1B2C3D4E5F1 /* LifeAdvisorApp.app */,
+				C7CF923BC3998E8CDF650C05 /* LifeAdvisorAppTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		F7AC31FA84B00F7369069285 /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				7EB94E6B0F1C758B723F72BB /* Foundation.framework */,
+				569718750664E9C30CC461F1 /* XCTest.framework */,
+			);
+			name = iOS;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		EEFB61D670E6EEC1FB570D3A /* LifeAdvisorAppTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0C01FE964822172D8AA0491F /* Build configuration list for PBXNativeTarget "LifeAdvisorAppTests" */;
+			buildPhases = (
+				87F722E034771D3CD047E17C /* Sources */,
+				20400DD26F3F71D78DE58ED4 /* Frameworks */,
+				66219415B55D3021202F51C1 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				7CE598957CB9024E621E76D1 /* PBXTargetDependency */,
+			);
+			name = LifeAdvisorAppTests;
+			productName = LifeAdvisorAppTests;
+			productReference = C7CF923BC3998E8CDF650C05 /* LifeAdvisorAppTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		F1B2C3D4E5F6F1B2C3D4E5F1 /* LifeAdvisorApp */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 51B2C3D4E5F651B2C3D4E5F2 /* Build configuration list for PBXNativeTarget "LifeAdvisorApp" */;
@@ -122,12 +257,20 @@
 			projectRoot = "";
 			targets = (
 				F1B2C3D4E5F6F1B2C3D4E5F1 /* LifeAdvisorApp */,
+				EEFB61D670E6EEC1FB570D3A /* LifeAdvisorAppTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		31B2C3D4E5F631B2C3D4E5F1 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		66219415B55D3021202F51C1 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -144,9 +287,46 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		87F722E034771D3CD047E17C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A37C8BC8F5E2A6888498FE23 /* LLMContractTests.swift in Sources */,
+				CC0E10A757F9FE93365DCE4F /* EstimationRuntimeTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		7CE598957CB9024E621E76D1 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = LifeAdvisorApp;
+			target = F1B2C3D4E5F6F1B2C3D4E5F1 /* LifeAdvisorApp */;
+			targetProxy = 4EEEE1C3B2FCA6A3A3DE8A11 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		11CD053E95B4C21DA372DCFF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleExecutable = "$(PRODUCT_NAME)";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lifeadvisor.LifeAdvisorAppTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LifeAdvisorApp.app/LifeAdvisorApp";
+				WRAPPER_EXTENSION = xctest;
+			};
+			name = Debug;
+		};
 		41B2C3D4E5F641B2C3D4E5F1 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -320,9 +500,38 @@
 			};
 			name = Release;
 		};
+		B6CDFBA83FEC84273B35365C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleExecutable = "$(PRODUCT_NAME)";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lifeadvisor.LifeAdvisorAppTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LifeAdvisorApp.app/LifeAdvisorApp";
+				VALIDATE_PRODUCT = YES;
+				WRAPPER_EXTENSION = xctest;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		0C01FE964822172D8AA0491F /* Build configuration list for PBXNativeTarget "LifeAdvisorAppTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B6CDFBA83FEC84273B35365C /* Release */,
+				11CD053E95B4C21DA372DCFF /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		51B2C3D4E5F651B2C3D4E5F1 /* Build configuration list for PBXProject "LifeAdvisorApp" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

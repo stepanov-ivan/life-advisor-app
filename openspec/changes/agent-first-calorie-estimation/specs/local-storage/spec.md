@@ -15,16 +15,16 @@
 - **WHEN** LLM-ответ не проходит schema-валидацию
 - **THEN** статус события меняется на `parse_failed`, raw текст сохраняется для повторной отправки
 
-### Requirement: Модель Ingredient
-Система SHALL хранить компоненты оценки как LLM-derived explainability-слой для режима `ingredient_breakdown`, без зависимости от справочника и семантики «на 100г».
+### Requirement: Модель EstimateItem
+Система SHALL хранить компоненты оценки как LLM-derived explainability-слой в новой сущности `EstimateItem` для режима `ingredient_breakdown`, без зависимости от справочника и семантики «на 100г».
 
 #### Scenario: Breakdown-режим
 - **WHEN** LLM возвращает `mode = ingredient_breakdown`
-- **THEN** система сохраняет компоненты оценки (в `Ingredient` или эквивалентной структуре) с оценочными макросами и полями explainability для показа и подсветки high-impact
+- **THEN** система сохраняет компоненты оценки в `EstimateItem` с оценочными макросами и полями explainability для показа и подсветки high-impact
 
 #### Scenario: Composite-режим
 - **WHEN** LLM возвращает `mode = composite_item`
-- **THEN** система может сохранить одну агрегированную позицию без обязательной декомпозиции на ингредиенты
+- **THEN** система сохраняет один `EstimateItem` без обязательной декомпозиции на подкомпоненты
 
 ### Requirement: Агрегация БЖУ
 Система SHALL вычислять итоговые поля `calories`, `proteins`, `fats`, `carbs` из результата LLM и обеспечивать консистентность с компонентами в режиме breakdown.
@@ -85,8 +85,30 @@
 - **WHEN** пользователь запускает переоценку существующего лога и новый ответ LLM не проходит schema-валидацию
 - **THEN** система сохраняет статус `parse_failed` и raw текст ошибки, но не затирает предыдущие валидные значения калорий/БЖУ и explainability
 
+#### Scenario: Отображение устаревшей оценки
+- **WHEN** лог находится в `parse_failed`, но имеет сохранённую предыдущую валидную оценку
+- **THEN** система показывает эту оценку с явной пометкой, что она не обновлена последней попыткой
+
+### Requirement: Snapshot overwrite при переоценке
+Система SHALL при успешной переоценке полностью заменять набор `EstimateItem` для соответствующего `MealEvent` новым снапшотом.
+
+#### Scenario: Полная замена компонент оценки
+- **WHEN** пользователь повторно оценивает существующий лог и получает валидный ответ LLM
+- **THEN** старые `EstimateItem` удаляются, а новые сохраняются как единственный актуальный набор
+
+### Requirement: Retention после удаления raw payload
+Система SHALL после purge raw payload сохранять краткую сводку ошибки парсинга (`parse_error_summary`) для диагностики.
+
+#### Scenario: Purge raw с сохранением summary
+- **WHEN** raw payload удалён по правилу 90 дней
+- **THEN** `parse_error_summary` и нормализованные поля остаются доступными для аналитики и отладки
+
 ## REMOVED Requirements
 
 ### Requirement: Модель MealTemplate
 **Reason**: Шаблоны исключены из основного UX-потока agent-first логирования в рамках данного change.
 **Migration**: Повторяемость пользовательского поведения переносится в механизм памяти правок по нормализованному fingerprint.
+
+### Requirement: Модель Ingredient
+**Reason**: Модель `Ingredient` заменяется на `EstimateItem` как целевая explainability-модель agent-first оценки.
+**Migration**: Выполнить destructive migration схемы и перенести код на использование `EstimateItem`.

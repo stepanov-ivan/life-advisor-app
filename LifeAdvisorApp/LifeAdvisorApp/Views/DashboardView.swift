@@ -241,8 +241,7 @@ struct DashboardView: View {
                 with: [
                     LLMClient.EstimateItemResult(
                         name: text,
-                        quantity: 1,
-                        unitRaw: "pcs",
+                        grams: 100,
                         estimatedCalories: draftStructure.calories,
                         estimatedProteins: draftStructure.proteins,
                         estimatedFats: draftStructure.fats,
@@ -567,8 +566,7 @@ struct MealEventEditorView: View {
     private struct ItemDraft: Identifiable {
         let id: PersistentIdentifier
         let item: EstimateItem
-        var quantity: String
-        var unit: MeasureUnit
+        var grams: String
         var calories: String
         var proteins: String
         var fats: String
@@ -642,8 +640,7 @@ struct MealEventEditorView: View {
 
                         VStack(alignment: .leading, spacing: 8) {
                             HStack(spacing: 4) {
-                                Text("кол-во").frame(width: 50, alignment: .leading)
-                                Text("ед").frame(width: 54, alignment: .leading)
+                                Text("г").frame(width: 60, alignment: .leading)
                                 Text("Ккал").frame(width: 44, alignment: .leading)
                                 Text("Б").frame(width: 44, alignment: .leading)
                                 Text("Ж").frame(width: 44, alignment: .leading)
@@ -656,20 +653,13 @@ struct MealEventEditorView: View {
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text(draft.item.name).font(.subheadline.bold())
                                     HStack(spacing: 4) {
-                                        TextField("0", text: $draft.quantity)
+                                        TextField("0", text: $draft.grams)
                                             .keyboardType(.decimalPad)
-                                            .frame(width: 50)
-                                            .onChange(of: draft.quantity) { _, _ in
+                                            .frame(width: 60)
+                                            .onChange(of: draft.grams) { _, _ in
+                                                unlockDraft(draft.id)
                                                 recalculateMacrosIfNeeded(for: draft.id)
                                             }
-                                        Picker("", selection: $draft.unit) {
-                                            ForEach(MeasureUnit.allCases, id: \.self) { unit in
-                                                Text(unit.title).tag(unit)
-                                            }
-                                        }
-                                        .labelsHidden()
-                                        .pickerStyle(.menu)
-                                        .frame(width: 54)
                                         TextField("ккал", text: $draft.calories)
                                             .keyboardType(.decimalPad)
                                             .frame(width: 44)
@@ -691,18 +681,6 @@ struct MealEventEditorView: View {
                                             .multilineTextAlignment(.leading)
                                             .onChange(of: draft.carbs) { _, _ in markDraftLocked(draft.id) }
                                     }
-                                    HStack {
-                                        Button("Сбросить к автопересчёту") {
-                                            resetDraftToAuto(draft.id)
-                                        }
-                                        .font(.caption2)
-                                        Spacer()
-                                        if draft.macrosLocked {
-                                            Text("Ручной режим")
-                                                .font(.caption2)
-                                                .foregroundColor(.orange)
-                                        }
-                                    }
                                 }
                             }
                         }
@@ -710,6 +688,7 @@ struct MealEventEditorView: View {
                         Button("Очистить состав", role: .destructive) {
                             showClearStructureConfirmation = true
                         }
+                        .buttonStyle(.borderless)
                     }
                 }
 
@@ -734,12 +713,11 @@ struct MealEventEditorView: View {
                         ItemDraft(
                             id: item.persistentModelID,
                             item: item,
-                            quantity: Self.format(item.quantity),
-                            unit: item.unit,
-                            calories: String(Int(item.estimatedCalories)),
-                            proteins: String(Int(item.estimatedProteins)),
-                            fats: String(Int(item.estimatedFats)),
-                            carbs: String(Int(item.estimatedCarbs)),
+                            grams: Self.format(item.grams),
+                            calories: Self.format(item.estimatedCalories),
+                            proteins: Self.format(item.estimatedProteins),
+                            fats: Self.format(item.estimatedFats),
+                            carbs: Self.format(item.estimatedCarbs),
                             macrosLocked: item.macrosLocked
                         )
                     }
@@ -851,8 +829,7 @@ struct MealEventEditorView: View {
             draft.item.estimatedProteins = proteins
             draft.item.estimatedFats = fats
             draft.item.estimatedCarbs = carbs
-            draft.item.quantity = Double(draft.quantity) ?? draft.item.quantity
-            draft.item.unit = draft.unit
+            draft.item.grams = Double(draft.grams) ?? draft.item.grams
             draft.item.macrosLocked = draft.macrosLocked
 
         }
@@ -878,7 +855,7 @@ struct MealEventEditorView: View {
 
     private var areItemDraftsValid: Bool {
         !itemDrafts.isEmpty && itemDrafts.allSatisfy {
-            Double($0.quantity) != nil &&
+            Double($0.grams) != nil &&
             Double($0.calories) != nil &&
             Double($0.proteins) != nil &&
             Double($0.fats) != nil &&
@@ -918,29 +895,21 @@ struct MealEventEditorView: View {
         itemDrafts[index].macrosLocked = true
     }
 
-    private func resetDraftToAuto(_ id: PersistentIdentifier) {
-        guard let index = itemDrafts.firstIndex(where: { $0.id == id }) else { return }
-        itemDrafts[index].macrosLocked = false
-        recalculateMacrosIfNeeded(for: id)
-    }
-
-    private func resetAllDraftsToAuto() {
-        for index in itemDrafts.indices {
-            itemDrafts[index].macrosLocked = false
-            recalculateMacrosIfNeeded(for: itemDrafts[index].id)
-        }
-    }
-
     private func recalculateMacrosIfNeeded(for id: PersistentIdentifier) {
         guard let index = itemDrafts.firstIndex(where: { $0.id == id }) else { return }
-        guard !itemDrafts[index].macrosLocked else { return }
-        guard let quantity = Double(itemDrafts[index].quantity), quantity > 0 else { return }
+        guard let grams = Double(itemDrafts[index].grams), grams > 0 else { return }
         let base = itemDrafts[index].item
-        let scale = quantity / 100.0
-        itemDrafts[index].calories = String(Int((base.baseCalories * scale).rounded()))
-        itemDrafts[index].proteins = String(Int((base.baseProteins * scale).rounded()))
-        itemDrafts[index].fats = String(Int((base.baseFats * scale).rounded()))
-        itemDrafts[index].carbs = String(Int((base.baseCarbs * scale).rounded()))
+        let baseline = max(0.1, base.baseGrams)
+        let scale = grams / baseline
+        itemDrafts[index].calories = Self.format(base.baseCalories * scale)
+        itemDrafts[index].proteins = Self.format(base.baseProteins * scale)
+        itemDrafts[index].fats = Self.format(base.baseFats * scale)
+        itemDrafts[index].carbs = Self.format(base.baseCarbs * scale)
+    }
+
+    private func unlockDraft(_ id: PersistentIdentifier) {
+        guard let index = itemDrafts.firstIndex(where: { $0.id == id }) else { return }
+        itemDrafts[index].macrosLocked = false
     }
 
     private func clearStructureAndSetPending() {

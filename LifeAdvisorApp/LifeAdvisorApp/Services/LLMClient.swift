@@ -44,23 +44,8 @@ enum LLMClient {
     }
 
     struct EstimateItemResult: Decodable {
-        enum ItemUnit: String, Decodable {
-            case g
-            case ml
-            case pcs
-
-            var measureUnit: MeasureUnit {
-                switch self {
-                case .g: return .g
-                case .ml: return .ml
-                case .pcs: return .pcs
-                }
-            }
-        }
-
         let name: String
-        let quantity: Double
-        let unitRaw: String
+        let grams: Double
         let estimatedCalories: Double
         let estimatedProteins: Double
         let estimatedFats: Double
@@ -70,16 +55,12 @@ enum LLMClient {
         let highCalorieFlag: Bool
 
         enum CodingKeys: String, CodingKey {
-            case name, quantity, estimatedCalories, estimatedProteins, estimatedFats, estimatedCarbs, reason
-            case unitRaw = "unit"
+            case name, grams, estimatedCalories, estimatedProteins, estimatedFats, estimatedCarbs, reason
             case impactScore = "impact_score"
             case highCalorieFlag = "high_calorie_flag"
         }
 
         var clampedImpactScore: Double { min(1, max(0, impactScore)) }
-        var unit: MeasureUnit {
-            ItemUnit(rawValue: unitRaw)?.measureUnit ?? .pcs
-        }
     }
 
     struct EstimationResult: Decodable {
@@ -108,11 +89,8 @@ enum LLMClient {
             }
             let namePortionPattern = #"\d+(?:[.,]\d+)?\s*(г|гр|грамм(?:а|ов)?|кг|мл|ml|л|литр(?:а|ов)?|шт|штук(?:и)?)|[()~]"#
             for item in items {
-                guard item.quantity > 0 else {
-                    throw LLMError.parseError("Invalid quantity in item: \(item.name)")
-                }
-                guard ["g", "ml", "pcs"].contains(item.unitRaw) else {
-                    throw LLMError.parseError("Invalid unit in item: \(item.name)")
+                guard item.grams > 0 else {
+                    throw LLMError.parseError("Invalid grams in item: \(item.name)")
                 }
                 let trimmedName = item.name.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmedName.isEmpty else {
@@ -225,8 +203,7 @@ enum LLMClient {
           "confidence": "low|medium|high",
           "items": [{
             "name": string,            // ТОЛЬКО чистое имя продукта/блюда без количества, скобок, тильды и служебных слов
-            "quantity": number,        // ОБЯЗАТЕЛЬНО > 0
-            "unit": "g|ml|pcs",        // ОБЯЗАТЕЛЬНО
+            "grams": number,           // ОБЯЗАТЕЛЬНО > 0
             "estimatedCalories": number,
             "estimatedProteins": number,
             "estimatedFats": number,
@@ -241,8 +218,8 @@ enum LLMClient {
           "estimationSchemaVersion": "v2"
         }
         Для каждого item:
-        1) quantity и unit обязательны, не пропускай.
-        2) Если точная граммовка неизвестна, всё равно оцени и укажи quantity в g/ml/pcs.
+        1) grams обязателен, не пропускай.
+        2) Если точная граммовка неизвестна, всё равно оцени и укажи grams.
         3) name должен быть чистым: "картофель", "минтай", "квашеная капуста".
            Нельзя: "3 средние картошки", "картошка (порция)", "~порция".
         Для composite_item верни минимум один item.

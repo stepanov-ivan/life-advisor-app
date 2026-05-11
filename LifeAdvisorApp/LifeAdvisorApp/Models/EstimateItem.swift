@@ -1,20 +1,6 @@
 import Foundation
 import SwiftData
 
-enum MeasureUnit: String, Codable, CaseIterable {
-    case g
-    case ml
-    case pcs
-
-    var title: String {
-        switch self {
-        case .g: return "г"
-        case .ml: return "мл"
-        case .pcs: return "шт"
-        }
-    }
-}
-
 @Model
 final class EstimateItem {
     var name: String
@@ -26,8 +12,8 @@ final class EstimateItem {
     var reason: String
     var highCalorieFlag: Bool
     var sourceModeRaw: String
-    var quantity: Double
-    var unitRaw: String
+    var grams: Double
+    var baseGrams: Double
     var baseCalories: Double
     var baseProteins: Double
     var baseFats: Double
@@ -41,11 +27,6 @@ final class EstimateItem {
         set { sourceModeRaw = newValue.rawValue }
     }
 
-    var unit: MeasureUnit {
-        get { MeasureUnit(rawValue: unitRaw) ?? .g }
-        set { unitRaw = newValue.rawValue }
-    }
-
     init(
         name: String,
         estimatedCalories: Double,
@@ -56,8 +37,7 @@ final class EstimateItem {
         reason: String,
         highCalorieFlag: Bool,
         sourceMode: EstimateSourceMode,
-        quantity: Double = 100,
-        unit: MeasureUnit = .g
+        grams: Double = 100
     ) {
         self.name = name
         self.estimatedCalories = estimatedCalories
@@ -68,8 +48,8 @@ final class EstimateItem {
         self.reason = String(reason.prefix(140))
         self.highCalorieFlag = highCalorieFlag
         self.sourceModeRaw = sourceMode.rawValue
-        self.quantity = max(0, quantity)
-        self.unitRaw = unit.rawValue
+        self.grams = max(0, grams)
+        self.baseGrams = max(0.1, grams)
         self.baseCalories = estimatedCalories
         self.baseProteins = estimatedProteins
         self.baseFats = estimatedFats

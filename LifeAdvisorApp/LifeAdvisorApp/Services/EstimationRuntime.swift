@@ -47,8 +47,7 @@ enum EstimationRuntime {
                 reason: parsed.reason,
                 highCalorieFlag: parsed.highCalorieFlag,
                 sourceMode: mode == "ingredient_breakdown" ? .ingredientBreakdown : .compositeItem,
-                quantity: parsed.quantity,
-                unit: parsed.unit
+                grams: parsed.grams
             )
             estimateItem.mealEvent = event
             modelContext.insert(estimateItem)

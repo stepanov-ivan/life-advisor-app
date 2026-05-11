@@ -264,8 +264,7 @@ final class EstimationRuntimeTests: XCTestCase {
         let newItems = [
             LLMClient.EstimateItemResult(
                 name: "new-1",
-                quantity: 180,
-                unitRaw: "g",
+                grams: 180,
                 estimatedCalories: 300,
                 estimatedProteins: 12,
                 estimatedFats: 11,
@@ -276,8 +275,7 @@ final class EstimationRuntimeTests: XCTestCase {
             ),
             LLMClient.EstimateItemResult(
                 name: "new-2",
-                quantity: 90,
-                unitRaw: "g",
+                grams: 90,
                 estimatedCalories: 120,
                 estimatedProteins: 4,
                 estimatedFats: 3,
@@ -381,7 +379,7 @@ final class EstimationRuntimeTests: XCTestCase {
         XCTAssertNil(MemoryPresentation.cleanAdviceText("режим оценки: ingredient_breakdown"))
     }
 
-    func testEstimateItemQuantityUnitAndLockContract() {
+    func testEstimateItemGramsAndLockContract() {
         let item = EstimateItem(
             name: "Кефир",
             estimatedCalories: 60,
@@ -392,12 +390,11 @@ final class EstimationRuntimeTests: XCTestCase {
             reason: "Базовая оценка",
             highCalorieFlag: false,
             sourceMode: .ingredientBreakdown,
-            quantity: 300.5,
-            unit: .ml
+            grams: 300.5
         )
 
-        XCTAssertEqual(item.quantity, 300.5, accuracy: 0.001)
-        XCTAssertEqual(item.unit, .ml)
+        XCTAssertEqual(item.grams, 300.5, accuracy: 0.001)
+        XCTAssertEqual(item.baseGrams, 300.5, accuracy: 0.001)
         XCTAssertEqual(item.baseCalories, 60, accuracy: 0.001)
         XCTAssertFalse(item.macrosLocked)
 

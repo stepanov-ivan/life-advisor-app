@@ -20,6 +20,12 @@ final class EstimationRuntimeTests: XCTestCase {
         return try ModelContainer(for: schema, configurations: [config])
     }
 
+    private func moscowCalendar() -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Moscow") ?? .current
+        return calendar
+    }
+
     func testLifecycleStatusesCanTransition() throws {
         let event = MealEvent(windowLabel: "Завтрак", status: .pendingEstimation, rawText: "Биг тейсти")
         XCTAssertEqual(event.status, .pendingEstimation)
@@ -258,6 +264,8 @@ final class EstimationRuntimeTests: XCTestCase {
         let newItems = [
             LLMClient.EstimateItemResult(
                 name: "new-1",
+                quantity: 180,
+                unitRaw: "g",
                 estimatedCalories: 300,
                 estimatedProteins: 12,
                 estimatedFats: 11,
@@ -268,6 +276,8 @@ final class EstimationRuntimeTests: XCTestCase {
             ),
             LLMClient.EstimateItemResult(
                 name: "new-2",
+                quantity: 90,
+                unitRaw: "g",
                 estimatedCalories: 120,
                 estimatedProteins: 4,
                 estimatedFats: 3,
@@ -314,5 +324,87 @@ final class EstimationRuntimeTests: XCTestCase {
         let fetched = try secondContext.fetch(FetchDescriptor<EstimateItem>())
 
         XCTAssertEqual(fetched.count, 0)
+    }
+
+    func testDashboardDateLogicRoundTripAndFutureGuard() {
+        let calendar = moscowCalendar()
+        let now = Date(timeIntervalSince1970: 1_747_000_000)
+        let todayKey = DashboardDateLogic.dayKey(for: now, calendar: calendar)
+        let restored = DashboardDateLogic.date(from: todayKey, calendar: calendar)
+        XCTAssertNotNil(restored)
+        XCTAssertEqual(DashboardDateLogic.dayKey(for: restored!, calendar: calendar), todayKey)
+
+        let future = calendar.date(byAdding: .day, value: 2, to: now)!
+        XCTAssertTrue(DashboardDateLogic.isFutureDate(future, now: now, calendar: calendar))
+        XCTAssertFalse(DashboardDateLogic.isFutureDate(now, now: now, calendar: calendar))
+    }
+
+    func testSelectedDayFilterRangeIncludesOnlyChosenDay() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let calendar = moscowCalendar()
+        let selected = DashboardDateLogic.startOfDay(Date(timeIntervalSince1970: 1_747_000_000), calendar: calendar)
+        let range = DashboardDateLogic.dayRange(for: selected, calendar: calendar)
+
+        let inDay = MealEvent(
+            windowLabel: "Завтрак",
+            timestamp: calendar.date(byAdding: .hour, value: 9, to: range.start)!,
+            status: .structured,
+            rawText: "Овсянка 250г"
+        )
+        let prevDay = MealEvent(
+            windowLabel: "Обед",
+            timestamp: calendar.date(byAdding: .hour, value: -2, to: range.start)!,
+            status: .structured,
+            rawText: "Паста"
+        )
+        context.insert(inDay)
+        context.insert(prevDay)
+        try context.save()
+
+        let start = range.start
+        let end = range.end
+        let descriptor = FetchDescriptor<MealEvent>(
+            predicate: #Predicate { $0.timestamp >= start && $0.timestamp < end },
+            sortBy: [SortDescriptor(\MealEvent.timestamp, order: .reverse)]
+        )
+        let events = try context.fetch(descriptor)
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events.first?.windowLabel, "Завтрак")
+    }
+
+    func testAdviceUsefulnessFiltersTechnicalAndShortText() {
+        XCTAssertFalse(MemoryPresentation.isAdviceUseful(nil))
+        XCTAssertFalse(MemoryPresentation.isAdviceUseful("коротко"))
+        XCTAssertFalse(MemoryPresentation.isAdviceUseful("Источник структуры: memorySuggestion, уверенность модели: medium"))
+        XCTAssertTrue(MemoryPresentation.isAdviceUseful("Добавьте 20-30 г белка в следующий прием пищи, чтобы закрыть дефицит по дню."))
+        XCTAssertNil(MemoryPresentation.cleanAdviceText("режим оценки: ingredient_breakdown"))
+    }
+
+    func testEstimateItemQuantityUnitAndLockContract() {
+        let item = EstimateItem(
+            name: "Кефир",
+            estimatedCalories: 60,
+            estimatedProteins: 3,
+            estimatedFats: 2,
+            estimatedCarbs: 4,
+            impactScore: 0.4,
+            reason: "Базовая оценка",
+            highCalorieFlag: false,
+            sourceMode: .ingredientBreakdown,
+            quantity: 300.5,
+            unit: .ml
+        )
+
+        XCTAssertEqual(item.quantity, 300.5, accuracy: 0.001)
+        XCTAssertEqual(item.unit, .ml)
+        XCTAssertEqual(item.baseCalories, 60, accuracy: 0.001)
+        XCTAssertFalse(item.macrosLocked)
+
+        item.macrosLocked = true
+        item.estimatedCalories = 120
+        XCTAssertTrue(item.macrosLocked)
+        XCTAssertEqual(item.estimatedCalories, 120, accuracy: 0.001)
+        XCTAssertEqual(item.baseCalories, 60, accuracy: 0.001)
     }
 }

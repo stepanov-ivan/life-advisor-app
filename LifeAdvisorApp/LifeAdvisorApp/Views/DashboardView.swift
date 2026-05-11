@@ -19,28 +19,41 @@ struct DashboardView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \MealWindow.order) private var windows: [MealWindow]
     @StateObject private var notificationManager = NotificationManager.shared
+    @AppStorage("dashboard_last_selected_day") private var lastSelectedDayKey = ""
 
     @State private var selectedWindow: String?
     @State private var editingEvent: MealEvent?
     @State private var logText = ""
+    @State private var selectedDate = DashboardDateLogic.startOfDay(Date())
+    @State private var showDatePicker = false
+    @State private var showFutureDateHint = false
 
     var activeHypothesis: MemoryHypothesis? {
         MemoryEngine.activeHypothesisPrompt(context: modelContext)
     }
 
-    var todayEvents: [MealEvent] {
-        let start = Calendar.current.startOfDay(for: Date())
+    var dayEvents: [MealEvent] {
+        let range = DashboardDateLogic.dayRange(for: selectedDate)
+        let start = range.start
+        let end = range.end
         let descriptor = FetchDescriptor<MealEvent>(
-            predicate: #Predicate { $0.timestamp >= start },
+            predicate: #Predicate { $0.timestamp >= start && $0.timestamp < end },
             sortBy: [SortDescriptor(\MealEvent.timestamp, order: .reverse)]
         )
         return (try? modelContext.fetch(descriptor)) ?? []
+    }
+
+    private var weekDates: [Date] {
+        DashboardDateLogic.weekDates(around: selectedDate)
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    dateNavigationRow
+                        .padding(.horizontal)
+
                     if let hypothesis = activeHypothesis {
                         hypothesisPromptCard(hypothesis)
                             .padding(.horizontal)
@@ -82,6 +95,9 @@ struct DashboardView: View {
                 .padding(.vertical)
             }
             .navigationTitle("Дашборд")
+            .onAppear {
+                restoreLastSelectedDate()
+            }
             .onChange(of: notificationManager.pendingLogWindow) { _, value in
                 guard let value else { return }
                 selectedWindow = value
@@ -102,6 +118,21 @@ struct DashboardView: View {
             .sheet(item: $editingEvent) { event in
                 MealEventEditorView(event: event)
             }
+            .sheet(isPresented: $showDatePicker) {
+                DatePickerSheet(
+                    selectedDate: selectedDate,
+                    onSelect: { date in
+                        if isFutureDate(date) {
+                            showFutureDateHint = true
+                            return
+                        }
+                        applySelectedDate(date)
+                    }
+                )
+            }
+            .alert("Будущие даты недоступны", isPresented: $showFutureDateHint) {
+                Button("OK", role: .cancel) { }
+            }
         }
     }
 
@@ -115,6 +146,49 @@ struct DashboardView: View {
         return labels.allSatisfy { label in
             guard let event = latestEvent(for: label) else { return false }
             return event.status == .structured || event.status == .skipped
+        }
+    }
+
+    @ViewBuilder
+    private var dateNavigationRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(selectedDate.formatted(date: .abbreviated, time: .omitted))
+                    .font(.headline)
+                Spacer()
+                Button {
+                    showDatePicker = true
+                } label: {
+                    Label("Календарь", systemImage: "calendar")
+                }
+                .buttonStyle(.bordered)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(weekDates, id: \.self) { day in
+                        let disabled = isFutureDate(day)
+                        Button {
+                            if disabled {
+                                showFutureDateHint = true
+                            } else {
+                                applySelectedDate(day)
+                            }
+                        } label: {
+                            VStack(spacing: 2) {
+                                Text(day.formatted(.dateTime.weekday(.narrow)))
+                                Text(day.formatted(.dateTime.day()))
+                            }
+                            .font(.caption)
+                            .frame(width: 40, height: 40)
+                            .background(isSameDay(day, selectedDate) ? Color.blue : Color.gray.opacity(0.15))
+                            .foregroundColor(disabled ? .gray : (isSameDay(day, selectedDate) ? .white : .primary))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
         }
     }
 
@@ -136,7 +210,12 @@ struct DashboardView: View {
             event.memoryApplied = false
             print("Meal upsert: update existing event for \(windowLabel), id=\(existing.persistentModelID)")
         } else {
-            let created = MealEvent(windowLabel: windowLabel, status: .pendingEstimation, rawText: text)
+            let created = MealEvent(
+                windowLabel: windowLabel,
+                timestamp: preferredTimestampForSelectedDay(),
+                status: .pendingEstimation,
+                rawText: text
+            )
             created.structureSource = .llm
             created.userNote = draft.treatTextAsNote ? text : nil
             modelContext.insert(created)
@@ -162,6 +241,8 @@ struct DashboardView: View {
                 with: [
                     LLMClient.EstimateItemResult(
                         name: text,
+                        quantity: 1,
+                        unitRaw: "pcs",
                         estimatedCalories: draftStructure.calories,
                         estimatedProteins: draftStructure.proteins,
                         estimatedFats: draftStructure.fats,
@@ -247,7 +328,11 @@ struct DashboardView: View {
         guard latestEvent(for: windowLabel) == nil else { return }
         clearRecommendationCacheForToday()
 
-        let event = MealEvent(windowLabel: windowLabel, status: .skipped)
+        let event = MealEvent(
+            windowLabel: windowLabel,
+            timestamp: preferredTimestampForSelectedDay(),
+            status: .skipped
+        )
         modelContext.insert(event)
         try? modelContext.save()
     }
@@ -264,7 +349,7 @@ struct DashboardView: View {
     private func requestDailyAdvice() {
         let goalCalories = UserDefaults.standard.double(forKey: "goal_calories")
         let labels = windows.map(\.name)
-        let events = todayEvents.filter { labels.contains($0.windowLabel) }
+        let events = dayEvents.filter { labels.contains($0.windowLabel) }
 
         let meals = events
             .filter { $0.status == .structured }
@@ -290,8 +375,46 @@ struct DashboardView: View {
         }
     }
 
+    private func restoreLastSelectedDate() {
+        guard !lastSelectedDayKey.isEmpty else {
+            selectedDate = DashboardDateLogic.startOfDay(Date())
+            return
+        }
+        guard let restored = DashboardDateLogic.date(from: lastSelectedDayKey) else {
+            selectedDate = DashboardDateLogic.startOfDay(Date())
+            return
+        }
+        if isFutureDate(restored) {
+            applySelectedDate(Date())
+            return
+        }
+        applySelectedDate(restored, persist: false)
+    }
+
+    private func applySelectedDate(_ date: Date, persist: Bool = true) {
+        selectedDate = DashboardDateLogic.startOfDay(date)
+        guard persist else { return }
+        lastSelectedDayKey = DashboardDateLogic.dayKey(for: selectedDate)
+    }
+
+    private func isFutureDate(_ date: Date) -> Bool {
+        DashboardDateLogic.isFutureDate(date)
+    }
+
+    private func isSameDay(_ lhs: Date, _ rhs: Date) -> Bool {
+        Calendar.current.isDate(lhs, inSameDayAs: rhs)
+    }
+
+    private func preferredTimestampForSelectedDay() -> Date {
+        let start = Calendar.current.startOfDay(for: selectedDate)
+        if isSameDay(selectedDate, Date()) {
+            return Date()
+        }
+        return Calendar.current.date(byAdding: .hour, value: 12, to: start) ?? start
+    }
+
     private func latestEvent(for windowLabel: String) -> MealEvent? {
-        todayEvents.first(where: { $0.windowLabel == windowLabel })
+        dayEvents.first(where: { $0.windowLabel == windowLabel })
     }
 
     private func lacksPortionSignal(_ text: String) -> Bool {
@@ -404,24 +527,6 @@ struct MealSlotCard: View {
                         Text("Б: \(Int(event.proteins))г Ж: \(Int(event.fats))г У: \(Int(event.carbs))г")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        if let confidence = event.confidence {
-                            Text("Уверенность: \(confidence)")
-                                .font(.caption2)
-                                .foregroundColor(confidence == "low" ? .orange : .secondary)
-                        }
-                        if event.structureSource == .memorySuggestion {
-                            Text("Из памяти")
-                                .font(.caption2.bold())
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.blue.opacity(0.15))
-                                .foregroundColor(.blue)
-                                .clipShape(Capsule())
-                        } else if event.memoryApplied {
-                            Text("Применена память прошлых правок")
-                                .font(.caption2)
-                                .foregroundColor(.blue)
-                        }
                         ForEach(event.estimateItems.prefix(3), id: \.persistentModelID) { item in
                             HStack {
                                 Text(item.name).font(.caption)
@@ -462,10 +567,13 @@ struct MealEventEditorView: View {
     private struct ItemDraft: Identifiable {
         let id: PersistentIdentifier
         let item: EstimateItem
+        var quantity: String
+        var unit: MeasureUnit
         var calories: String
         var proteins: String
         var fats: String
         var carbs: String
+        var macrosLocked: Bool
     }
 
     @Environment(\.modelContext) private var modelContext
@@ -478,7 +586,7 @@ struct MealEventEditorView: View {
     @State private var errorText = ""
     @State private var itemDrafts: [ItemDraft] = []
     @State private var pendingOutOfSyncDecision = false
-    @State private var showAllExplainabilityFactors = false
+    @State private var showClearStructureConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -490,11 +598,11 @@ struct MealEventEditorView: View {
 
                 if event.outOfSync {
                     Section {
-                        Text("Текст изменён после выбора структуры.")
+                        Text("Текст изменён. Структура может быть неактуальна.")
                             .font(.caption)
                             .foregroundColor(.orange)
                     } header: {
-                        Text("out_of_sync")
+                        Text("Синхронизация")
                     }
                 }
 
@@ -509,16 +617,10 @@ struct MealEventEditorView: View {
                     }
                 }
 
-                Section("Почему этот совет") {
-                    let factors = explainabilityFactors
-                    ForEach(displayedFactors(factors), id: \.self) { factor in
-                        Text("• \(factor)")
+                if let adviceText {
+                    Section("Совет") {
+                        Text(adviceText)
                             .font(.caption)
-                    }
-                    if factors.count > 2 {
-                        Button(showAllExplainabilityFactors ? "Скрыть детали" : "Показать всё") {
-                            showAllExplainabilityFactors.toggle()
-                        }
                     }
                 }
 
@@ -528,33 +630,91 @@ struct MealEventEditorView: View {
                     }
                 }
 
-                Section("Ручная корректировка по позициям") {
+                Section("Состав блюда") {
                     if itemDrafts.isEmpty {
                         Text("Нет позиций для редактирования. Сначала выполните оценку.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     } else {
-                        ForEach($itemDrafts) { $draft in
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(draft.item.name).font(.subheadline.bold())
-                                HStack {
-                                    TextField("ккал", text: $draft.calories).keyboardType(.decimalPad)
-                                    TextField("Б", text: $draft.proteins).keyboardType(.decimalPad)
-                                    TextField("Ж", text: $draft.fats).keyboardType(.decimalPad)
-                                    TextField("У", text: $draft.carbs).keyboardType(.decimalPad)
+                        Text("Изменения сохраняются автоматически")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 4) {
+                                Text("кол-во").frame(width: 50, alignment: .leading)
+                                Text("ед").frame(width: 54, alignment: .leading)
+                                Text("Ккал").frame(width: 44, alignment: .leading)
+                                Text("Б").frame(width: 44, alignment: .leading)
+                                Text("Ж").frame(width: 44, alignment: .leading)
+                                Text("У").frame(width: 44, alignment: .leading)
+                            }
+                            .font(.caption2.bold())
+                            .foregroundColor(.secondary)
+
+                            ForEach($itemDrafts) { $draft in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(draft.item.name).font(.subheadline.bold())
+                                    HStack(spacing: 4) {
+                                        TextField("0", text: $draft.quantity)
+                                            .keyboardType(.decimalPad)
+                                            .frame(width: 50)
+                                            .onChange(of: draft.quantity) { _, _ in
+                                                recalculateMacrosIfNeeded(for: draft.id)
+                                            }
+                                        Picker("", selection: $draft.unit) {
+                                            ForEach(MeasureUnit.allCases, id: \.self) { unit in
+                                                Text(unit.title).tag(unit)
+                                            }
+                                        }
+                                        .labelsHidden()
+                                        .pickerStyle(.menu)
+                                        .frame(width: 54)
+                                        TextField("ккал", text: $draft.calories)
+                                            .keyboardType(.decimalPad)
+                                            .frame(width: 44)
+                                            .multilineTextAlignment(.leading)
+                                            .onChange(of: draft.calories) { _, _ in markDraftLocked(draft.id) }
+                                        TextField("Б", text: $draft.proteins)
+                                            .keyboardType(.decimalPad)
+                                            .frame(width: 44)
+                                            .multilineTextAlignment(.leading)
+                                            .onChange(of: draft.proteins) { _, _ in markDraftLocked(draft.id) }
+                                        TextField("Ж", text: $draft.fats)
+                                            .keyboardType(.decimalPad)
+                                            .frame(width: 44)
+                                            .multilineTextAlignment(.leading)
+                                            .onChange(of: draft.fats) { _, _ in markDraftLocked(draft.id) }
+                                        TextField("У", text: $draft.carbs)
+                                            .keyboardType(.decimalPad)
+                                            .frame(width: 44)
+                                            .multilineTextAlignment(.leading)
+                                            .onChange(of: draft.carbs) { _, _ in markDraftLocked(draft.id) }
+                                    }
+                                    HStack {
+                                        Button("Сбросить к автопересчёту") {
+                                            resetDraftToAuto(draft.id)
+                                        }
+                                        .font(.caption2)
+                                        Spacer()
+                                        if draft.macrosLocked {
+                                            Text("Ручной режим")
+                                                .font(.caption2)
+                                                .foregroundColor(.orange)
+                                        }
+                                    }
                                 }
                             }
                         }
 
-                        Button("Применить коррекцию") {
-                            applyManualCorrection()
+                        Button("Очистить состав", role: .destructive) {
+                            showClearStructureConfirmation = true
                         }
-                        .disabled(!areItemDraftsValid)
                     }
                 }
 
                 Section {
-                    Button(isSubmitting ? "Отправка..." : "Сохранить и переоценить") {
+                    Button(isSubmitting ? "Отправка..." : "Пересчитать по тексту") {
                         if requiresOutOfSyncDecision {
                             pendingOutOfSyncDecision = true
                         } else {
@@ -574,20 +734,26 @@ struct MealEventEditorView: View {
                         ItemDraft(
                             id: item.persistentModelID,
                             item: item,
+                            quantity: Self.format(item.quantity),
+                            unit: item.unit,
                             calories: String(Int(item.estimatedCalories)),
                             proteins: String(Int(item.estimatedProteins)),
                             fats: String(Int(item.estimatedFats)),
-                            carbs: String(Int(item.estimatedCarbs))
+                            carbs: String(Int(item.estimatedCarbs)),
+                            macrosLocked: item.macrosLocked
                         )
                     }
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Готово") { dismiss() }
+                    Button("Готово") {
+                        applyManualCorrection()
+                        dismiss()
+                    }
                 }
             }
             .confirmationDialog("Текст и структура расходятся", isPresented: $pendingOutOfSyncDecision) {
-                Button("Переоценить по тексту") {
+                Button("Пересчитать по тексту") {
                     reestimate()
                 }
                 Button("Оставить структуру") {
@@ -596,6 +762,12 @@ struct MealEventEditorView: View {
                 Button("Отмена", role: .cancel) { }
             } message: {
                 Text("По умолчанию лучше переоценить. Можно оставить текущую структуру и сохранить текст как заметку.")
+            }
+            .confirmationDialog("Очистить все позиции структуры?", isPresented: $showClearStructureConfirmation) {
+                Button("Очистить", role: .destructive) {
+                    clearStructureAndSetPending()
+                }
+                Button("Отмена", role: .cancel) { }
             }
         }
     }
@@ -679,6 +851,9 @@ struct MealEventEditorView: View {
             draft.item.estimatedProteins = proteins
             draft.item.estimatedFats = fats
             draft.item.estimatedCarbs = carbs
+            draft.item.quantity = Double(draft.quantity) ?? draft.item.quantity
+            draft.item.unit = draft.unit
+            draft.item.macrosLocked = draft.macrosLocked
 
         }
 
@@ -703,6 +878,7 @@ struct MealEventEditorView: View {
 
     private var areItemDraftsValid: Bool {
         !itemDrafts.isEmpty && itemDrafts.allSatisfy {
+            Double($0.quantity) != nil &&
             Double($0.calories) != nil &&
             Double($0.proteins) != nil &&
             Double($0.fats) != nil &&
@@ -725,21 +901,66 @@ struct MealEventEditorView: View {
         dismiss()
     }
 
-    private var explainabilityFactors: [String] {
-        MemoryPresentation.explainabilityFactors(
-            source: event.structureSource,
-            confidence: event.confidence,
-            memoryApplied: event.memoryApplied,
-            sourceMode: event.sourceMode,
-            items: event.estimateItems
-        )
+    private var adviceText: String? {
+        let reasons = event.estimateItems
+            .map(\.reason)
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let merged = reasons.prefix(2).joined(separator: " ")
+        guard let cleaned = MemoryPresentation.cleanAdviceText(merged) else { return nil }
+        if event.structureSource == .memorySuggestion && !MemoryPresentation.isAdviceUseful(cleaned) {
+            return nil
+        }
+        return cleaned
     }
 
-    private func displayedFactors(_ factors: [String]) -> [String] {
-        MemoryPresentation.topExplainabilityFactors(
-            factors,
-            showAll: showAllExplainabilityFactors
-        )
+    private func markDraftLocked(_ id: PersistentIdentifier) {
+        guard let index = itemDrafts.firstIndex(where: { $0.id == id }) else { return }
+        itemDrafts[index].macrosLocked = true
+    }
+
+    private func resetDraftToAuto(_ id: PersistentIdentifier) {
+        guard let index = itemDrafts.firstIndex(where: { $0.id == id }) else { return }
+        itemDrafts[index].macrosLocked = false
+        recalculateMacrosIfNeeded(for: id)
+    }
+
+    private func resetAllDraftsToAuto() {
+        for index in itemDrafts.indices {
+            itemDrafts[index].macrosLocked = false
+            recalculateMacrosIfNeeded(for: itemDrafts[index].id)
+        }
+    }
+
+    private func recalculateMacrosIfNeeded(for id: PersistentIdentifier) {
+        guard let index = itemDrafts.firstIndex(where: { $0.id == id }) else { return }
+        guard !itemDrafts[index].macrosLocked else { return }
+        guard let quantity = Double(itemDrafts[index].quantity), quantity > 0 else { return }
+        let base = itemDrafts[index].item
+        let scale = quantity / 100.0
+        itemDrafts[index].calories = String(Int((base.baseCalories * scale).rounded()))
+        itemDrafts[index].proteins = String(Int((base.baseProteins * scale).rounded()))
+        itemDrafts[index].fats = String(Int((base.baseFats * scale).rounded()))
+        itemDrafts[index].carbs = String(Int((base.baseCarbs * scale).rounded()))
+    }
+
+    private func clearStructureAndSetPending() {
+        let oldItems = Array(event.estimateItems)
+        itemDrafts = []
+        event.applyTotals(calories: 0, proteins: 0, fats: 0, carbs: 0)
+        event.status = .pendingEstimation
+        event.parseErrorSummary = nil
+        event.outOfSync = true
+        for oldItem in oldItems {
+            modelContext.delete(oldItem)
+        }
+        try? modelContext.save()
+    }
+
+    private static func format(_ value: Double) -> String {
+        if value.rounded() == value {
+            return String(Int(value))
+        }
+        return String(format: "%.1f", value)
     }
 }
 
@@ -963,6 +1184,44 @@ struct LogSheetView: View {
             max(0, base.fats * scale),
             max(0, base.carbs * scale)
         )
+    }
+}
+
+private struct DatePickerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var draftDate: Date
+    let onSelect: (Date) -> Void
+
+    init(selectedDate: Date, onSelect: @escaping (Date) -> Void) {
+        _draftDate = State(initialValue: selectedDate)
+        self.onSelect = onSelect
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                DatePicker(
+                    "Дата",
+                    selection: $draftDate,
+                    displayedComponents: [.date]
+                )
+                .datePickerStyle(.graphical)
+
+                Button("Выбрать") {
+                    onSelect(draftDate)
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .padding()
+            .navigationTitle("Выбор даты")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Отмена") { dismiss() }
+                }
+            }
+        }
     }
 }
 

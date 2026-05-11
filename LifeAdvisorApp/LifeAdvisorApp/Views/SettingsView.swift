@@ -4,6 +4,9 @@ import SwiftData
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \MealWindow.order) private var windows: [MealWindow]
+    @Query(sort: \MemorySuggestion.lastUsedAt, order: .reverse) private var memorySuggestions: [MemorySuggestion]
+    @Query(sort: \MemoryHypothesis.lastSeenAt, order: .reverse) private var memoryHypotheses: [MemoryHypothesis]
+    @Query(sort: \MemoryDataGap.updatedAt, order: .reverse) private var memoryDataGaps: [MemoryDataGap]
 
     @AppStorage("llm_endpoint") private var endpoint = ""
     @AppStorage("llm_model") private var model = ""
@@ -15,6 +18,7 @@ struct SettingsView: View {
     @State private var newWindowName = ""
     @State private var newStartTime = Date()
     @State private var newEndTime = Calendar.current.date(byAdding: .hour, value: 1, to: Date()) ?? Date()
+    @State private var showWipeMemoryConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -22,10 +26,100 @@ struct SettingsView: View {
                 llmSection
                 goalSection
                 windowsSection
+                memorySection
             }
             .navigationTitle("Настройки")
             .onAppear {
                 apiKey = KeychainHelper.read(key: "llm_api_key") ?? ""
+            }
+        }
+    }
+
+    private var memorySection: some View {
+        Section("Память") {
+            if memorySuggestions.isEmpty && memoryHypotheses.isEmpty && memoryDataGaps.isEmpty {
+                Text("Память пока пустая")
+                    .foregroundColor(.secondary)
+            }
+
+            if !memorySuggestions.isEmpty {
+                Text("Шаблоны")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                ForEach(memorySuggestions.prefix(10)) { suggestion in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(suggestion.displayText)
+                            Text("\(Int(suggestion.calories)) ккал")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Button(role: .destructive) {
+                            MemoryEngine.deleteMemorySuggestion(suggestion, context: modelContext)
+                            try? modelContext.save()
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                    }
+                }
+            }
+
+            if !memoryHypotheses.isEmpty {
+                Text("Гипотезы")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                ForEach(memoryHypotheses.prefix(10)) { hypothesis in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(hypothesis.title)
+                            Text(hypothesis.status.rawValue)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Button(role: .destructive) {
+                            MemoryEngine.deleteHypothesis(hypothesis, context: modelContext)
+                            try? modelContext.save()
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                    }
+                }
+            }
+
+            if !memoryDataGaps.isEmpty {
+                Text("Data-gap")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                ForEach(memoryDataGaps.prefix(10)) { gap in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(gap.title)
+                            Text(gap.itemFingerprint)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Button(role: .destructive) {
+                            MemoryEngine.deleteDataGap(gap, context: modelContext)
+                            try? modelContext.save()
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                    }
+                }
+            }
+
+            Button("Сбросить всю память", role: .destructive) {
+                showWipeMemoryConfirm = true
+            }
+            .confirmationDialog("Удалить все memory-записи?", isPresented: $showWipeMemoryConfirm) {
+                Button("Удалить всё", role: .destructive) {
+                    MemoryEngine.wipeAllMemory(context: modelContext)
+                    try? modelContext.save()
+                }
+                Button("Отмена", role: .cancel) { }
             }
         }
     }

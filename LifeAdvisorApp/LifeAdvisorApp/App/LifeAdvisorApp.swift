@@ -11,7 +11,10 @@ struct LifeAdvisorApp: App {
         let schema = Schema([
             MealEvent.self,
             EstimateItem.self,
-            EstimationMemory.self,
+            MemorySuggestion.self,
+            MemorySuggestionAlias.self,
+            MemoryHypothesis.self,
+            MemoryDataGap.self,
             MealWindow.self,
             DailyAdvice.self,
             Recommendation.self
@@ -37,6 +40,7 @@ struct LifeAdvisorApp: App {
 
         setupDefaultMealWindowsIfNeeded()
         purgeExpiredRawPayloads()
+        purgeExpiredMemoryArtifacts()
     }
 
     var body: some Scene {
@@ -88,6 +92,27 @@ struct LifeAdvisorApp: App {
                 if event.parseErrorSummary?.isEmpty == true {
                     event.parseErrorSummary = nil
                 }
+            }
+        }
+
+        try? context.save()
+    }
+
+    private func purgeExpiredMemoryArtifacts() {
+        let context = modelContainer.mainContext
+        let cutoff = Calendar.current.date(byAdding: .day, value: -60, to: Date()) ?? Date.distantPast
+
+        let gapDescriptor = FetchDescriptor<MemoryDataGap>()
+        if let gaps = try? context.fetch(gapDescriptor) {
+            for gap in gaps where gap.updatedAt < cutoff {
+                context.delete(gap)
+            }
+        }
+
+        let hypothesisDescriptor = FetchDescriptor<MemoryHypothesis>()
+        if let hypotheses = try? context.fetch(hypothesisDescriptor) {
+            for hypothesis in hypotheses where hypothesis.status == .pendingConfirmation && hypothesis.lastSeenAt < cutoff {
+                context.delete(hypothesis)
             }
         }
 

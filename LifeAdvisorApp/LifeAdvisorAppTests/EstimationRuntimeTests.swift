@@ -8,7 +8,10 @@ final class EstimationRuntimeTests: XCTestCase {
         let schema = Schema([
             MealEvent.self,
             EstimateItem.self,
-            EstimationMemory.self,
+            MemorySuggestion.self,
+            MemorySuggestionAlias.self,
+            MemoryHypothesis.self,
+            MemoryDataGap.self,
             MealWindow.self,
             DailyAdvice.self,
             Recommendation.self
@@ -26,6 +29,10 @@ final class EstimationRuntimeTests: XCTestCase {
 
         event.status = .parseFailed
         XCTAssertEqual(event.status, .parseFailed)
+        event.structureSource = .memorySuggestion
+        XCTAssertEqual(event.structureSource, .memorySuggestion)
+        event.structureSource = .manualOverride
+        XCTAssertEqual(event.structureSource, .manualOverride)
     }
 
     func testParseFailedCanPreserveLastGoodTotals() throws {
@@ -44,9 +51,16 @@ final class EstimationRuntimeTests: XCTestCase {
 
     func testMemoryPriorIsNonBlockingAverage() {
         let totals = LLMClient.Totals(calories: 800, proteins: 30, fats: 30, carbs: 90)
-        let memory = EstimationMemory(fingerprint: "a b", calories: 600, proteins: 20, fats: 20, carbs: 70)
+        let memory = MemorySuggestion(
+            canonicalKey: "a b",
+            displayText: "a b",
+            calories: 600,
+            proteins: 20,
+            fats: 20,
+            carbs: 70
+        )
 
-        let applied = EstimationRuntime.applyMemoryPrior(totals: totals, memory: memory)
+        let applied = EstimationRuntime.applySuggestionPrior(totals: totals, suggestion: memory)
 
         XCTAssertEqual(applied.calories, 700, accuracy: 0.001)
         XCTAssertEqual(applied.proteins, 25, accuracy: 0.001)
@@ -58,6 +72,166 @@ final class EstimationRuntimeTests: XCTestCase {
         XCTAssertTrue(EstimationRuntime.lowConfidenceWarningVisible("low"))
         XCTAssertFalse(EstimationRuntime.lowConfidenceWarningVisible("medium"))
         XCTAssertFalse(EstimationRuntime.lowConfidenceWarningVisible(nil))
+    }
+
+    func testOutOfSyncDetection() {
+        XCTAssertFalse(MemoryEngine.isOutOfSync(selectedText: "Кефир 2.5 300г", currentText: "кефир 2.5% 300г"))
+        XCTAssertTrue(MemoryEngine.isOutOfSync(selectedText: "Биг мак", currentText: "Биг тейсти"))
+    }
+
+    func testSuggestionLimitAndRanking() {
+        let now = Date()
+        let events = (0..<60).map { index -> MealEvent in
+            let event = MealEvent(windowLabel: "Обед", timestamp: now.addingTimeInterval(TimeInterval(-index * 60)), status: .structured, rawText: index % 2 == 0 ? "Кефир 300г" : "Биг мак")
+            event.applyTotals(calories: index % 2 == 0 ? 150 : 500, proteins: 10, fats: 10, carbs: 10)
+            return event
+        }
+        let suggestions = MemoryEngine.topSuggestions(query: "кеф", from: events, suggestions: [], limit: 5)
+        XCTAssertLessThanOrEqual(suggestions.count, 5)
+        XCTAssertTrue(suggestions.first?.text.lowercased().contains("кеф") ?? false)
+    }
+
+    func testDataGapAutoCloseAfterTwoConfirmations() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let fingerprint = MemoryEngine.normalize("Кефир 300г")
+
+        MemoryEngine.recordDataGap(title: "Нет порции", fingerprint: fingerprint, context: context)
+        MemoryEngine.confirmDataGap(fingerprint: fingerprint, context: context)
+        MemoryEngine.confirmDataGap(fingerprint: fingerprint, context: context)
+        try context.save()
+
+        let expectedKey = "gap:\(fingerprint)"
+        let descriptor = FetchDescriptor<MemoryDataGap>(predicate: #Predicate { $0.key == expectedKey })
+        let gap = try context.fetch(descriptor).first
+        XCTAssertNotNil(gap)
+        XCTAssertEqual(gap?.confirmationCount, 2)
+        XCTAssertTrue(gap?.resolved ?? false)
+    }
+
+    func testHypothesisSignalThreshold() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        MemoryEngine.applyHypothesisSignal(key: "no_fish", title: "Возможно не ест рыбу", context: context)
+        MemoryEngine.applyHypothesisSignal(key: "no_fish", title: "Возможно не ест рыбу", context: context)
+        try context.save()
+
+        let descriptor = FetchDescriptor<MemoryHypothesis>(predicate: #Predicate { $0.key == "no_fish" })
+        let hypothesis = try context.fetch(descriptor).first
+        XCTAssertEqual(hypothesis?.signalCount, 2)
+        XCTAssertNotNil(hypothesis?.nextPromptAt)
+    }
+
+    func testHypothesisSnoozeAndConflictLifecycle() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        MemoryEngine.applyHypothesisSignal(key: "avoid_fish", title: "avoid fish?", context: context)
+        MemoryEngine.applyHypothesisSignal(key: "avoid_fish", title: "avoid fish?", context: context)
+        let descriptor = FetchDescriptor<MemoryHypothesis>(predicate: #Predicate { $0.key == "avoid_fish" })
+        guard let hypothesis = try context.fetch(descriptor).first else {
+            return XCTFail("Hypothesis not created")
+        }
+
+        XCTAssertEqual(hypothesis.status, .pendingConfirmation)
+        XCTAssertNotNil(hypothesis.nextPromptAt)
+
+        MemoryEngine.snoozeHypothesis(hypothesis)
+        let snoozeDate = hypothesis.nextPromptAt
+        XCTAssertNotNil(snoozeDate)
+        XCTAssertTrue((snoozeDate?.timeIntervalSinceNow ?? 0) > 2 * 24 * 60 * 60)
+
+        MemoryEngine.confirmHypothesis(hypothesis)
+        XCTAssertEqual(hypothesis.status, .confirmed)
+
+        MemoryEngine.registerHypothesisConflict(hypothesis)
+        XCTAssertEqual(hypothesis.status, .underReview)
+        XCTAssertNotNil(hypothesis.cooldownUntil)
+        XCTAssertNotNil(hypothesis.lastConflictAt)
+    }
+
+    func testCandidatePromotionAndVersionLimit() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+
+        MemoryEngine.upsertPrimarySuggestion(
+            text: "Кефир 300г",
+            totals: (calories: 150, proteins: 9, fats: 7, carbs: 12),
+            context: context
+        )
+        MemoryEngine.upsertPrimarySuggestion(
+            text: "Кефир 300г",
+            totals: (calories: 280, proteins: 12, fats: 10, carbs: 20),
+            context: context
+        )
+        MemoryEngine.upsertPrimarySuggestion(
+            text: "Кефир 300г",
+            totals: (calories: 280, proteins: 12, fats: 10, carbs: 20),
+            context: context
+        )
+        MemoryEngine.upsertPrimarySuggestion(
+            text: "Кефир 300г",
+            totals: (calories: 320, proteins: 15, fats: 12, carbs: 24),
+            context: context
+        )
+        MemoryEngine.upsertPrimarySuggestion(
+            text: "Кефир 300г",
+            totals: (calories: 320, proteins: 15, fats: 12, carbs: 24),
+            context: context
+        )
+        try context.save()
+
+        let key = MemoryEngine.normalize("Кефир 300г")
+        let descriptor = FetchDescriptor<MemorySuggestion>(
+            predicate: #Predicate { $0.canonicalKey == key },
+            sortBy: [SortDescriptor(\MemorySuggestion.lastUsedAt, order: .reverse)]
+        )
+        let versions = try context.fetch(descriptor)
+        XCTAssertLessThanOrEqual(versions.count, 3)
+        XCTAssertTrue(versions.contains(where: { !$0.isCandidate }))
+    }
+
+    func testOutOfSyncPromptDecisionContract() {
+        XCTAssertTrue(
+            MemoryPresentation.shouldPromptOutOfSync(
+                source: .memorySuggestion,
+                selectedText: "кефир 300г",
+                currentText: "кефир 500г"
+            )
+        )
+        XCTAssertFalse(
+            MemoryPresentation.shouldPromptOutOfSync(
+                source: .llm,
+                selectedText: "кефир 300г",
+                currentText: "кефир 500г"
+            )
+        )
+    }
+
+    func testExplainabilityTopFactorsContract() {
+        let item = EstimateItem(
+            name: "Орехи",
+            estimatedCalories: 200,
+            estimatedProteins: 5,
+            estimatedFats: 18,
+            estimatedCarbs: 4,
+            impactScore: 0.9,
+            reason: "Высокая плотность калорий",
+            highCalorieFlag: true,
+            sourceMode: .ingredientBreakdown
+        )
+        let factors = MemoryPresentation.explainabilityFactors(
+            source: .memorySuggestion,
+            confidence: "medium",
+            memoryApplied: true,
+            sourceMode: .ingredientBreakdown,
+            items: [item]
+        )
+        XCTAssertGreaterThanOrEqual(factors.count, 4)
+
+        let top2 = MemoryPresentation.topExplainabilityFactors(factors, showAll: false)
+        XCTAssertEqual(top2.count, 2)
+        let all = MemoryPresentation.topExplainabilityFactors(factors, showAll: true)
+        XCTAssertEqual(all.count, factors.count)
     }
 
     func testSnapshotOverwriteReplacesOldItems() throws {

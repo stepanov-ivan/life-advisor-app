@@ -2,18 +2,18 @@ import Foundation
 import SwiftData
 
 enum EstimationRuntime {
-    static func applyMemoryPrior(
+    static func applySuggestionPrior(
         totals: LLMClient.Totals,
-        memory: EstimationMemory?
+        suggestion: MemorySuggestion?
     ) -> (calories: Double, proteins: Double, fats: Double, carbs: Double) {
-        guard let memory else {
+        guard let suggestion else {
             return (totals.calories, totals.proteins, totals.fats, totals.carbs)
         }
         return (
-            calories: (totals.calories + memory.calories) / 2,
-            proteins: (totals.proteins + memory.proteins) / 2,
-            fats: (totals.fats + memory.fats) / 2,
-            carbs: (totals.carbs + memory.carbs) / 2
+            calories: (totals.calories + suggestion.calories) / 2,
+            proteins: (totals.proteins + suggestion.proteins) / 2,
+            fats: (totals.fats + suggestion.fats) / 2,
+            carbs: (totals.carbs + suggestion.carbs) / 2
         )
     }
 
@@ -55,5 +55,10 @@ enum EstimationRuntime {
 
     static func lowConfidenceWarningVisible(_ confidence: String?) -> Bool {
         confidence == "low"
+    }
+
+    static func shouldUpdatePrimarySuggestion(oldCalories: Double, newCalories: Double) -> Bool {
+        guard oldCalories > 0 else { return true }
+        return abs(newCalories - oldCalories) / oldCalories <= 0.30
     }
 }

@@ -14,6 +14,12 @@ enum EstimateSourceMode: String, Codable {
     case compositeItem = "composite_item"
 }
 
+enum StructureSource: String, Codable {
+    case llm
+    case memorySuggestion = "memory_suggestion"
+    case manualOverride = "manual_override"
+}
+
 @Model
 final class MealEvent {
     @Attribute(.unique) var id: UUID
@@ -36,6 +42,9 @@ final class MealEvent {
     var rawPayloadCreatedAt: Date?
     var parseErrorSummary: String?
     var memoryApplied: Bool
+    var structureSourceRaw: String
+    var outOfSync: Bool
+    var userNote: String?
 
     @Relationship(deleteRule: .cascade, inverse: \EstimateItem.mealEvent)
     var estimateItems: [EstimateItem] = []
@@ -51,6 +60,11 @@ final class MealEvent {
             return EstimateSourceMode(rawValue: sourceModeRaw)
         }
         set { sourceModeRaw = newValue?.rawValue }
+    }
+
+    var structureSource: StructureSource {
+        get { StructureSource(rawValue: structureSourceRaw) ?? .llm }
+        set { structureSourceRaw = newValue.rawValue }
     }
 
     init(
@@ -69,6 +83,8 @@ final class MealEvent {
         self.fats = 0
         self.carbs = 0
         self.memoryApplied = false
+        self.structureSourceRaw = StructureSource.llm.rawValue
+        self.outOfSync = false
     }
 
     func applyTotals(calories: Double, proteins: Double, fats: Double, carbs: Double) {

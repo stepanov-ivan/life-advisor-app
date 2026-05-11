@@ -2,6 +2,20 @@ import SwiftUI
 import SwiftData
 
 struct DashboardView: View {
+    struct ManualDraftStructure {
+        var calories: Double
+        var proteins: Double
+        var fats: Double
+        var carbs: Double
+        var source: StructureSource
+    }
+
+    struct LogDraftResult {
+        var text: String
+        var draftStructure: ManualDraftStructure?
+        var treatTextAsNote: Bool
+    }
+
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \MealWindow.order) private var windows: [MealWindow]
     @StateObject private var notificationManager = NotificationManager.shared
@@ -9,6 +23,10 @@ struct DashboardView: View {
     @State private var selectedWindow: String?
     @State private var editingEvent: MealEvent?
     @State private var logText = ""
+
+    var activeHypothesis: MemoryHypothesis? {
+        MemoryEngine.activeHypothesisPrompt(context: modelContext)
+    }
 
     var todayEvents: [MealEvent] {
         let start = Calendar.current.startOfDay(for: Date())
@@ -23,6 +41,11 @@ struct DashboardView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    if let hypothesis = activeHypothesis {
+                        hypothesisPromptCard(hypothesis)
+                            .padding(.horizontal)
+                    }
+
                     DisclosureGroup("Питание") {
                         ForEach(windows) { window in
                             let event = latestEvent(for: window.name)
@@ -71,8 +94,8 @@ struct DashboardView: View {
                 notificationManager.pendingSkipWindow = nil
             }
             .sheet(item: selectedWindowBinding) { window in
-                LogSheetView(windowLabel: window, logText: $logText) {
-                    saveMealEvent(windowLabel: window)
+                LogSheetView(windowLabel: window, initialText: logText) { draft in
+                    saveMealEvent(windowLabel: window, draft: draft)
                     selectedWindow = nil
                 }
             }
@@ -95,8 +118,8 @@ struct DashboardView: View {
         }
     }
 
-    private func saveMealEvent(windowLabel: String) {
-        let text = logText.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func saveMealEvent(windowLabel: String, draft: LogDraftResult) {
+        let text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
         clearRecommendationCacheForToday()
@@ -105,18 +128,58 @@ struct DashboardView: View {
         if let existing = latestEvent(for: windowLabel) {
             event = existing
             event.rawText = text
+            event.userNote = draft.treatTextAsNote ? text : nil
             event.status = .pendingEstimation
+            event.structureSource = .llm
+            event.outOfSync = false
             event.parseErrorSummary = nil
             event.memoryApplied = false
             print("Meal upsert: update existing event for \(windowLabel), id=\(existing.persistentModelID)")
         } else {
             let created = MealEvent(windowLabel: windowLabel, status: .pendingEstimation, rawText: text)
+            created.structureSource = .llm
+            created.userNote = draft.treatTextAsNote ? text : nil
             modelContext.insert(created)
             event = created
             print("Meal upsert: create new event for \(windowLabel), id=\(created.persistentModelID)")
         }
+
+        if let draftStructure = draft.draftStructure, draft.treatTextAsNote {
+            event.applyTotals(
+                calories: draftStructure.calories,
+                proteins: draftStructure.proteins,
+                fats: draftStructure.fats,
+                carbs: draftStructure.carbs
+            )
+            event.status = .structured
+            event.structureSource = draftStructure.source
+            event.outOfSync = true
+            event.confidence = "medium"
+            event.memoryApplied = draftStructure.source == .memorySuggestion
+            let sourceMode: EstimateSourceMode = .compositeItem
+            EstimationRuntime.overwriteSnapshot(
+                event: event,
+                with: [
+                    LLMClient.EstimateItemResult(
+                        name: text,
+                        estimatedCalories: draftStructure.calories,
+                        estimatedProteins: draftStructure.proteins,
+                        estimatedFats: draftStructure.fats,
+                        estimatedCarbs: draftStructure.carbs,
+                        impactScore: 1,
+                        reason: "Из памяти",
+                        highCalorieFlag: draftStructure.calories >= 450
+                    )
+                ],
+                mode: sourceMode.rawValue,
+                modelContext: modelContext
+            )
+        }
         try? modelContext.save()
 
+        if draft.draftStructure != nil && draft.treatTextAsNote {
+            return
+        }
         Task {
             await estimate(event: event, replacingExistingItems: true)
         }
@@ -126,8 +189,7 @@ struct DashboardView: View {
     private func estimate(event: MealEvent, replacingExistingItems: Bool) async {
         guard let text = event.rawText, !text.isEmpty else { return }
 
-        let fingerprint = normalizedFingerprint(from: text)
-        let memory = findMemory(for: fingerprint)
+        let memory = MemoryEngine.resolveSuggestion(for: text, context: modelContext)
 
         do {
             let result = try await LLMClient.estimateMeal(text: text)
@@ -141,7 +203,7 @@ struct DashboardView: View {
                 )
             }
 
-            let totals = EstimationRuntime.applyMemoryPrior(totals: result.parsed.totals, memory: memory)
+            let totals = EstimationRuntime.applySuggestionPrior(totals: result.parsed.totals, suggestion: memory)
 
             event.applyTotals(calories: totals.calories, proteins: totals.proteins, fats: totals.fats, carbs: totals.carbs)
             event.status = .structured
@@ -150,16 +212,32 @@ struct DashboardView: View {
             event.modelId = result.parsed.modelId
             event.promptVersion = result.parsed.promptVersion
             event.estimationSchemaVersion = result.parsed.estimationSchemaVersion
+            event.structureSource = .llm
+            event.outOfSync = false
             event.rawPayload = result.rawPayload
             event.rawPayloadCreatedAt = Date()
             event.parseErrorSummary = nil
             event.memoryApplied = memory != nil
+            if result.parsed.confidence == "low" && lacksPortionSignal(text) {
+                MemoryEngine.recordDataGap(
+                    title: "Не хватает порции",
+                    fingerprint: MemoryEngine.normalize(text),
+                    context: modelContext
+                )
+            }
+            MemoryEngine.upsertPrimarySuggestion(
+                text: text,
+                totals: totals,
+                context: modelContext
+            )
+            applyHypothesisSignals(for: text)
             try? modelContext.save()
             print("Meal estimate saved: \(event.windowLabel), status=\(event.status.rawValue), kcal=\(event.calories)")
         } catch {
             event.status = .parseFailed
             event.parseErrorSummary = error.localizedDescription
             event.rawPayloadCreatedAt = Date()
+            event.structureSource = .llm
             try? modelContext.save()
             print("Meal estimate failed: \(event.windowLabel), error=\(error.localizedDescription)")
         }
@@ -212,21 +290,82 @@ struct DashboardView: View {
         }
     }
 
-    private func normalizedFingerprint(from text: String) -> String {
-        text.lowercased()
-            .replacingOccurrences(of: "[^a-zа-я0-9\\s]", with: " ", options: .regularExpression)
-            .split(separator: " ")
-            .sorted()
-            .joined(separator: " ")
-    }
-
-    private func findMemory(for fingerprint: String) -> EstimationMemory? {
-        let descriptor = FetchDescriptor<EstimationMemory>(predicate: #Predicate { $0.fingerprint == fingerprint })
-        return try? modelContext.fetch(descriptor).first
-    }
-
     private func latestEvent(for windowLabel: String) -> MealEvent? {
         todayEvents.first(where: { $0.windowLabel == windowLabel })
+    }
+
+    private func lacksPortionSignal(_ text: String) -> Bool {
+        let normalized = text.lowercased()
+        if normalized.range(of: "\\b\\d+\\s?(г|гр|грам|кг|мл|ml|шт|порц)", options: .regularExpression) != nil {
+            return false
+        }
+        return true
+    }
+
+    @ViewBuilder
+    private func hypothesisPromptCard(_ hypothesis: MemoryHypothesis) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Уточнение предпочтения")
+                .font(.subheadline.bold())
+            Text(hypothesis.title)
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            HStack {
+                Button("Да") {
+                    MemoryEngine.confirmHypothesis(hypothesis)
+                    try? modelContext.save()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+
+                Button("Нет") {
+                    MemoryEngine.rejectHypothesis(hypothesis)
+                    try? modelContext.save()
+                }
+                .buttonStyle(.bordered)
+
+                Button("Спросить позже") {
+                    MemoryEngine.snoozeHypothesis(hypothesis)
+                    try? modelContext.save()
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding()
+        .background(Color.orange.opacity(0.1))
+        .cornerRadius(12)
+    }
+
+    private func applyHypothesisSignals(for text: String) {
+        let normalized = text.lowercased()
+        if normalized.contains("без рыбы") || normalized.contains("не ем рыбу") || normalized.contains("без рыб") {
+            MemoryEngine.applyHypothesisSignal(
+                key: "avoid_fish",
+                title: "Похоже, вы избегаете рыбу. Это так?",
+                context: modelContext
+            )
+        }
+        if normalized.contains("без молока") || normalized.contains("не ем молочное") || normalized.contains("лактоз") {
+            MemoryEngine.applyHypothesisSignal(
+                key: "avoid_dairy",
+                title: "Похоже, вы ограничиваете молочные продукты. Это так?",
+                context: modelContext
+            )
+        }
+
+        let descriptor = FetchDescriptor<MemoryHypothesis>()
+        guard let hypotheses = try? modelContext.fetch(descriptor) else { return }
+        for hypothesis in hypotheses where hypothesis.status == .confirmed {
+            if hypothesis.key == "avoid_fish" &&
+                (normalized.contains("лосось") || normalized.contains("тунец") || normalized.contains("рыба")) {
+                MemoryEngine.registerHypothesisConflict(hypothesis)
+            }
+            if hypothesis.key == "avoid_dairy" &&
+                (normalized.contains("молоко") || normalized.contains("сыр") || normalized.contains("йогурт")) {
+                MemoryEngine.registerHypothesisConflict(hypothesis)
+            }
+        }
     }
 }
 
@@ -270,7 +409,15 @@ struct MealSlotCard: View {
                                 .font(.caption2)
                                 .foregroundColor(confidence == "low" ? .orange : .secondary)
                         }
-                        if event.memoryApplied {
+                        if event.structureSource == .memorySuggestion {
+                            Text("Из памяти")
+                                .font(.caption2.bold())
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.blue.opacity(0.15))
+                                .foregroundColor(.blue)
+                                .clipShape(Capsule())
+                        } else if event.memoryApplied {
                             Text("Применена память прошлых правок")
                                 .font(.caption2)
                                 .foregroundColor(.blue)
@@ -330,6 +477,8 @@ struct MealEventEditorView: View {
     @State private var isSubmitting = false
     @State private var errorText = ""
     @State private var itemDrafts: [ItemDraft] = []
+    @State private var pendingOutOfSyncDecision = false
+    @State private var showAllExplainabilityFactors = false
 
     var body: some View {
         NavigationStack {
@@ -339,11 +488,37 @@ struct MealEventEditorView: View {
                         .lineLimit(3...8)
                 }
 
+                if event.outOfSync {
+                    Section {
+                        Text("Текст изменён после выбора структуры.")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    } header: {
+                        Text("out_of_sync")
+                    }
+                }
+
                 if event.status == .structured && EstimationRuntime.lowConfidenceWarningVisible(event.confidence) {
                     Section {
                         Text("Оценка с низкой уверенностью. Можно уточнить текст.")
                             .font(.caption)
                             .foregroundColor(.orange)
+                        Text("Не хватает точной порции или контекста. Уточнение граммовки повышает точность.")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Section("Почему этот совет") {
+                    let factors = explainabilityFactors
+                    ForEach(displayedFactors(factors), id: \.self) { factor in
+                        Text("• \(factor)")
+                            .font(.caption)
+                    }
+                    if factors.count > 2 {
+                        Button(showAllExplainabilityFactors ? "Скрыть детали" : "Показать всё") {
+                            showAllExplainabilityFactors.toggle()
+                        }
                     }
                 }
 
@@ -380,7 +555,11 @@ struct MealEventEditorView: View {
 
                 Section {
                     Button(isSubmitting ? "Отправка..." : "Сохранить и переоценить") {
-                        reestimate()
+                        if requiresOutOfSyncDecision {
+                            pendingOutOfSyncDecision = true
+                        } else {
+                            reestimate()
+                        }
                     }
                     .disabled(isSubmitting || textDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
@@ -406,6 +585,17 @@ struct MealEventEditorView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Готово") { dismiss() }
                 }
+            }
+            .confirmationDialog("Текст и структура расходятся", isPresented: $pendingOutOfSyncDecision) {
+                Button("Переоценить по тексту") {
+                    reestimate()
+                }
+                Button("Оставить структуру") {
+                    keepStructureAsSourceOfTruth()
+                }
+                Button("Отмена", role: .cancel) { }
+            } message: {
+                Text("По умолчанию лучше переоценить. Можно оставить текущую структуру и сохранить текст как заметку.")
             }
         }
     }
@@ -449,6 +639,8 @@ struct MealEventEditorView: View {
                     event.modelId = result.parsed.modelId
                     event.promptVersion = result.parsed.promptVersion
                     event.estimationSchemaVersion = result.parsed.estimationSchemaVersion
+                    event.structureSource = .llm
+                    event.outOfSync = false
                     event.rawPayload = result.rawPayload
                     event.rawPayloadCreatedAt = Date()
                     event.parseErrorSummary = nil
@@ -461,6 +653,7 @@ struct MealEventEditorView: View {
                     event.status = .parseFailed
                     event.parseErrorSummary = error.localizedDescription
                     event.applyTotals(calories: oldTotals.0, proteins: oldTotals.1, fats: oldTotals.2, carbs: oldTotals.3)
+                    event.structureSource = .llm
                     try? modelContext.save()
                     errorText = "Не удалось обновить оценку. Исправьте текст и попробуйте снова."
                     isSubmitting = false
@@ -493,12 +686,17 @@ struct MealEventEditorView: View {
 
         event.applyTotals(calories: totals.calories, proteins: totals.proteins, fats: totals.fats, carbs: totals.carbs)
         event.memoryApplied = false
-        saveMemoryPrior(
-            for: event.rawText ?? "",
-            calories: totals.calories,
-            proteins: totals.proteins,
-            fats: totals.fats,
-            carbs: totals.carbs
+        event.structureSource = .manualOverride
+        event.outOfSync = false
+        MemoryEngine.upsertPrimarySuggestion(
+            text: event.rawText ?? "",
+            totals: (
+                calories: totals.calories,
+                proteins: totals.proteins,
+                fats: totals.fats,
+                carbs: totals.carbs
+            ),
+            context: modelContext
         )
         try? modelContext.save()
     }
@@ -512,43 +710,66 @@ struct MealEventEditorView: View {
         }
     }
 
-    private func saveMemoryPrior(for text: String, calories: Double, proteins: Double, fats: Double, carbs: Double) {
-        let fingerprint = text.lowercased()
-            .replacingOccurrences(of: "[^a-zа-я0-9\\s]", with: " ", options: .regularExpression)
-            .split(separator: " ")
-            .sorted()
-            .joined(separator: " ")
-        guard !fingerprint.isEmpty else { return }
-
-        let descriptor = FetchDescriptor<EstimationMemory>(
-            predicate: #Predicate { $0.fingerprint == fingerprint }
+    private var requiresOutOfSyncDecision: Bool {
+        MemoryPresentation.shouldPromptOutOfSync(
+            source: event.structureSource,
+            selectedText: event.rawText,
+            currentText: textDraft
         )
-        if let existing = try? modelContext.fetch(descriptor).first {
-            existing.calories = calories
-            existing.proteins = proteins
-            existing.fats = fats
-            existing.carbs = carbs
-            existing.updatedAt = Date()
-        } else {
-            modelContext.insert(
-                EstimationMemory(
-                    fingerprint: fingerprint,
-                    calories: calories,
-                    proteins: proteins,
-                    fats: fats,
-                    carbs: carbs
-                )
-            )
-        }
+    }
+
+    private func keepStructureAsSourceOfTruth() {
+        event.userNote = textDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        event.outOfSync = true
+        try? modelContext.save()
+        dismiss()
+    }
+
+    private var explainabilityFactors: [String] {
+        MemoryPresentation.explainabilityFactors(
+            source: event.structureSource,
+            confidence: event.confidence,
+            memoryApplied: event.memoryApplied,
+            sourceMode: event.sourceMode,
+            items: event.estimateItems
+        )
+    }
+
+    private func displayedFactors(_ factors: [String]) -> [String] {
+        MemoryPresentation.topExplainabilityFactors(
+            factors,
+            showAll: showAllExplainabilityFactors
+        )
     }
 }
 
 struct LogSheetView: View {
+    private enum SaveMode {
+        case reestimateFromText
+        case keepDraftStructure
+    }
+
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
     let windowLabel: String
-    @Binding var logText: String
-    let onSave: () -> Void
+    let initialText: String
+    let onSave: (DashboardView.LogDraftResult) -> Void
+
+    @State private var logText: String
+    @State private var selectedSuggestion: MemoryEngine.SuggestionViewModel?
+    @State private var saveMode: SaveMode = .reestimateFromText
+    @State private var showOutOfSyncDecision = false
+    @State private var suggestions: [MemoryEngine.SuggestionViewModel] = []
+    @State private var selectedPortionGrams: Int?
+    @State private var customPortionGrams = ""
+
+    init(windowLabel: String, initialText: String, onSave: @escaping (DashboardView.LogDraftResult) -> Void) {
+        self.windowLabel = windowLabel
+        self.initialText = initialText
+        self.onSave = onSave
+        _logText = State(initialValue: initialText)
+    }
 
     var body: some View {
         NavigationStack {
@@ -556,10 +777,74 @@ struct LogSheetView: View {
                 TextField("Что съели?", text: $logText, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(4...8)
+                    .onChange(of: logText) { _, newValue in
+                        if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            selectedSuggestion = nil
+                            saveMode = .reestimateFromText
+                            suggestions = []
+                            return
+                        }
+                        refreshSuggestions()
+                    }
+
+                if !suggestions.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(suggestions, id: \.canonicalKey) { suggestion in
+                                Button(suggestion.text) {
+                                    selectedSuggestion = suggestion
+                                    logText = suggestion.text
+                                    saveMode = .reestimateFromText
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                    }
+                }
+
+                if let selectedSuggestion {
+                    HStack(spacing: 6) {
+                        Text("Из памяти")
+                            .font(.caption2.bold())
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.blue.opacity(0.15))
+                            .foregroundColor(.blue)
+                            .clipShape(Capsule())
+                        Text("\(Int(selectedSuggestion.calories)) ккал")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Уточнить порцию")
+                            .font(.caption.bold())
+                        HStack {
+                            ForEach([200, 300, 500], id: \.self) { grams in
+                                Button("\(grams)г") {
+                                    selectedPortionGrams = grams
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(selectedPortionGrams == grams ? .blue : .gray)
+                            }
+                            TextField("Свой", text: $customPortionGrams)
+                                .keyboardType(.numberPad)
+                                .frame(width: 70)
+                                .textFieldStyle(.roundedBorder)
+                                .onChange(of: customPortionGrams) { _, value in
+                                    if let grams = Int(value), grams > 0 {
+                                        selectedPortionGrams = grams
+                                    }
+                                }
+                            Text("г")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
 
                 Button("Готово") {
-                    onSave()
-                    dismiss()
+                    handleSaveTap()
                 }
                 .disabled(logText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .frame(maxWidth: .infinity)
@@ -573,12 +858,111 @@ struct LogSheetView: View {
             .padding()
             .navigationTitle(windowLabel)
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                refreshSuggestions()
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Отмена") { dismiss() }
                 }
             }
+            .confirmationDialog("Текст отличается от структуры", isPresented: $showOutOfSyncDecision) {
+                Button("Переоценить по тексту") {
+                    saveMode = .reestimateFromText
+                    completeSave()
+                }
+                Button("Оставить структуру") {
+                    saveMode = .keepDraftStructure
+                    completeSave()
+                }
+                Button("Отмена", role: .cancel) { }
+            } message: {
+                Text("Если оставить структуру, текст сохранится как заметка и не повлияет на расчёт.")
+            }
         }
+    }
+
+    private func handleSaveTap() {
+        guard let selectedSuggestion else {
+            completeSave()
+            return
+        }
+        if MemoryEngine.isOutOfSync(selectedText: selectedSuggestion.text, currentText: logText) {
+            showOutOfSyncDecision = true
+            return
+        }
+        saveMode = .keepDraftStructure
+        completeSave()
+    }
+
+    private func completeSave() {
+        let trimmed = logText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let draftStructure: DashboardView.ManualDraftStructure?
+        if let selectedSuggestion {
+            let adjusted = adjustedByPortion(base: selectedSuggestion)
+            draftStructure = DashboardView.ManualDraftStructure(
+                calories: adjusted.calories,
+                proteins: adjusted.proteins,
+                fats: adjusted.fats,
+                carbs: adjusted.carbs,
+                source: .memorySuggestion
+            )
+            MemoryEngine.confirmDataGap(
+                fingerprint: selectedSuggestion.canonicalKey,
+                context: modelContext
+            )
+        } else {
+            draftStructure = nil
+        }
+
+        onSave(
+            DashboardView.LogDraftResult(
+                text: trimmed,
+                draftStructure: draftStructure,
+                treatTextAsNote: saveMode == .keepDraftStructure
+            )
+        )
+        dismiss()
+    }
+
+    private func refreshSuggestions() {
+        let trimmed = logText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            suggestions = []
+            return
+        }
+
+        let eventDescriptor = FetchDescriptor<MealEvent>(
+            sortBy: [SortDescriptor(\MealEvent.timestamp, order: .reverse)]
+        )
+        let events = (try? modelContext.fetch(eventDescriptor)) ?? []
+
+        let suggestionDescriptor = FetchDescriptor<MemorySuggestion>(
+            sortBy: [SortDescriptor(\MemorySuggestion.lastUsedAt, order: .reverse)]
+        )
+        let stored = (try? modelContext.fetch(suggestionDescriptor)) ?? []
+
+        suggestions = MemoryEngine.topSuggestions(
+            query: trimmed,
+            from: events,
+            suggestions: stored,
+            limit: 5
+        )
+    }
+
+    private func adjustedByPortion(base: MemoryEngine.SuggestionViewModel) -> (calories: Double, proteins: Double, fats: Double, carbs: Double) {
+        guard let grams = selectedPortionGrams else {
+            return (base.calories, base.proteins, base.fats, base.carbs)
+        }
+        let scale = Double(grams) / 300.0
+        return (
+            max(0, base.calories * scale),
+            max(0, base.proteins * scale),
+            max(0, base.fats * scale),
+            max(0, base.carbs * scale)
+        )
     }
 }
 

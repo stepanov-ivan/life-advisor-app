@@ -42,22 +42,3 @@ final class EstimateItem {
         self.sourceModeRaw = sourceMode.rawValue
     }
 }
-
-@Model
-final class EstimationMemory {
-    @Attribute(.unique) var fingerprint: String
-    var calories: Double
-    var proteins: Double
-    var fats: Double
-    var carbs: Double
-    var updatedAt: Date
-
-    init(fingerprint: String, calories: Double, proteins: Double, fats: Double, carbs: Double, updatedAt: Date = Date()) {
-        self.fingerprint = fingerprint
-        self.calories = calories
-        self.proteins = proteins
-        self.fats = fats
-        self.carbs = carbs
-        self.updatedAt = updatedAt
-    }
-}

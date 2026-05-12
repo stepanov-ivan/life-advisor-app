@@ -3,17 +3,32 @@ import SwiftData
 
 struct DashboardView: View {
     struct ManualDraftStructure {
+        struct DraftItem {
+            var name: String
+            var grams: Double
+            var calories: Double
+            var proteins: Double
+            var fats: Double
+            var carbs: Double
+            var impactScore: Double
+            var reason: String
+            var highCalorieFlag: Bool
+        }
+
         var calories: Double
         var proteins: Double
         var fats: Double
         var carbs: Double
         var source: StructureSource
+        var sourceText: String
+        var items: [DraftItem]
     }
 
     struct LogDraftResult {
         var text: String
         var draftStructure: ManualDraftStructure?
         var treatTextAsNote: Bool
+        var keepStructureWithoutReestimate: Bool
     }
 
     @Environment(\.modelContext) private var modelContext
@@ -193,8 +208,8 @@ struct DashboardView: View {
     }
 
     private func saveMealEvent(windowLabel: String, draft: LogDraftResult) {
-        let text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        let text = MemoryEngine.normalizeForSync(draft.text)
+        guard text.count >= 3 else { return }
 
         clearRecommendationCacheForToday()
 
@@ -206,6 +221,8 @@ struct DashboardView: View {
             event.status = .pendingEstimation
             event.structureSource = .llm
             event.outOfSync = false
+            event.baselineTextNormalized = nil
+            event.structureLastSyncedAt = nil
             event.parseErrorSummary = nil
             event.memoryApplied = false
             print("Meal upsert: update existing event for \(windowLabel), id=\(existing.persistentModelID)")
@@ -218,12 +235,14 @@ struct DashboardView: View {
             )
             created.structureSource = .llm
             created.userNote = draft.treatTextAsNote ? text : nil
+            created.baselineTextNormalized = nil
+            created.structureLastSyncedAt = nil
             modelContext.insert(created)
             event = created
             print("Meal upsert: create new event for \(windowLabel), id=\(created.persistentModelID)")
         }
 
-        if let draftStructure = draft.draftStructure, draft.treatTextAsNote {
+        if let draftStructure = draft.draftStructure, draft.keepStructureWithoutReestimate {
             event.applyTotals(
                 calories: draftStructure.calories,
                 proteins: draftStructure.proteins,
@@ -232,32 +251,49 @@ struct DashboardView: View {
             )
             event.status = .structured
             event.structureSource = draftStructure.source
-            event.outOfSync = true
+            event.outOfSync = MemoryEngine.isOutOfSync(
+                selectedText: draftStructure.sourceText,
+                currentText: text
+            )
+            event.baselineTextNormalized = MemoryEngine.normalizeForSync(draftStructure.sourceText)
+            event.structureLastSyncedAt = Date()
             event.confidence = "medium"
             event.memoryApplied = draftStructure.source == .memorySuggestion
             let sourceMode: EstimateSourceMode = .compositeItem
             EstimationRuntime.overwriteSnapshot(
                 event: event,
-                with: [
+                with: draftStructure.items.map {
                     LLMClient.EstimateItemResult(
-                        name: text,
-                        grams: 100,
-                        estimatedCalories: draftStructure.calories,
-                        estimatedProteins: draftStructure.proteins,
-                        estimatedFats: draftStructure.fats,
-                        estimatedCarbs: draftStructure.carbs,
-                        impactScore: 1,
-                        reason: "Из памяти",
-                        highCalorieFlag: draftStructure.calories >= 450
+                        name: $0.name,
+                        grams: $0.grams,
+                        estimatedCalories: $0.calories,
+                        estimatedProteins: $0.proteins,
+                        estimatedFats: $0.fats,
+                        estimatedCarbs: $0.carbs,
+                        impactScore: $0.impactScore,
+                        reason: $0.reason,
+                        highCalorieFlag: $0.highCalorieFlag
                     )
-                ],
+                },
                 mode: sourceMode.rawValue,
                 modelContext: modelContext
             )
+            EstimationRuntime.applyHighCalorieFlags(for: event)
         }
         try? modelContext.save()
 
-        if draft.draftStructure != nil && draft.treatTextAsNote {
+        if draft.draftStructure != nil && draft.keepStructureWithoutReestimate {
+            MemoryEngine.upsertPrimarySuggestion(
+                text: text,
+                totals: (
+                    calories: event.calories,
+                    proteins: event.proteins,
+                    fats: event.fats,
+                    carbs: event.carbs
+                ),
+                items: event.estimateItems,
+                context: modelContext
+            )
             return
         }
         Task {
@@ -267,9 +303,54 @@ struct DashboardView: View {
 
     @MainActor
     private func estimate(event: MealEvent, replacingExistingItems: Bool) async {
-        guard let text = event.rawText, !text.isEmpty else { return }
+        guard let rawText = event.rawText else { return }
+        let text = MemoryEngine.normalizeForSync(rawText)
+        guard text.count >= 3 else { return }
+        event.rawText = text
 
         let memory = MemoryEngine.resolveSuggestion(for: text, context: modelContext)
+        let memoryItems = MemoryEngine.decodeSuggestionItems(memory?.itemsPayload)
+
+        if replacingExistingItems, let memory, !memoryItems.isEmpty, MemoryEngine.normalizeForSync(memory.sourceText).count >= 3 {
+            let parsed = memoryItems.map {
+                LLMClient.EstimateItemResult(
+                    name: $0.name,
+                    grams: $0.grams,
+                    estimatedCalories: $0.estimatedCalories,
+                    estimatedProteins: $0.estimatedProteins,
+                    estimatedFats: $0.estimatedFats,
+                    estimatedCarbs: $0.estimatedCarbs,
+                    impactScore: $0.impactScore,
+                    reason: $0.reason,
+                    highCalorieFlag: $0.highCalorieFlag
+                )
+            }
+            EstimationRuntime.overwriteSnapshot(
+                event: event,
+                with: parsed,
+                mode: EstimateSourceMode.ingredientBreakdown.rawValue,
+                modelContext: modelContext
+            )
+            EstimationRuntime.applyHighCalorieFlags(for: event)
+            let totals = EstimationRuntime.aggregateTotals(items: event.estimateItems)
+            event.applyTotals(calories: totals.calories, proteins: totals.proteins, fats: totals.fats, carbs: totals.carbs)
+            event.status = .structured
+            event.confidence = "medium"
+            event.sourceMode = .ingredientBreakdown
+            event.modelId = nil
+            event.promptVersion = nil
+            event.estimationSchemaVersion = nil
+            event.structureSource = .memorySuggestion
+            event.outOfSync = false
+            event.baselineTextNormalized = text
+            event.structureLastSyncedAt = Date()
+            event.rawPayload = nil
+            event.rawPayloadCreatedAt = nil
+            event.parseErrorSummary = nil
+            event.memoryApplied = true
+            try? modelContext.save()
+            return
+        }
 
         do {
             let result = try await LLMClient.estimateMeal(text: text)
@@ -283,7 +364,7 @@ struct DashboardView: View {
                 )
             }
 
-            let totals = EstimationRuntime.applySuggestionPrior(totals: result.parsed.totals, suggestion: memory)
+            let totals = result.parsed.totals
 
             event.applyTotals(calories: totals.calories, proteins: totals.proteins, fats: totals.fats, carbs: totals.carbs)
             event.status = .structured
@@ -294,10 +375,13 @@ struct DashboardView: View {
             event.estimationSchemaVersion = result.parsed.estimationSchemaVersion
             event.structureSource = .llm
             event.outOfSync = false
+            event.baselineTextNormalized = text
+            event.structureLastSyncedAt = Date()
             event.rawPayload = result.rawPayload
             event.rawPayloadCreatedAt = Date()
             event.parseErrorSummary = nil
-            event.memoryApplied = memory != nil
+            event.memoryApplied = false
+            EstimationRuntime.applyHighCalorieFlags(for: event)
             if result.parsed.confidence == "low" && lacksPortionSignal(text) {
                 MemoryEngine.recordDataGap(
                     title: "Не хватает порции",
@@ -307,7 +391,13 @@ struct DashboardView: View {
             }
             MemoryEngine.upsertPrimarySuggestion(
                 text: text,
-                totals: totals,
+                totals: (
+                    calories: totals.calories,
+                    proteins: totals.proteins,
+                    fats: totals.fats,
+                    carbs: totals.carbs
+                ),
+                items: event.estimateItems,
                 context: modelContext
             )
             applyHypothesisSignals(for: text)
@@ -634,53 +724,52 @@ struct MealEventEditorView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                     } else {
-                        Text("Изменения сохраняются автоматически")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-
                         VStack(alignment: .leading, spacing: 8) {
                             HStack(spacing: 4) {
-                                Text("г").frame(width: 60, alignment: .leading)
-                                Text("Ккал").frame(width: 44, alignment: .leading)
-                                Text("Б").frame(width: 44, alignment: .leading)
-                                Text("Ж").frame(width: 44, alignment: .leading)
-                                Text("У").frame(width: 44, alignment: .leading)
+                                Text("Продукт")
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Text("г").frame(width: 44, alignment: .leading)
+                                Text("Ккал").frame(width: 40, alignment: .leading)
+                                Text("Б").frame(width: 30, alignment: .leading)
+                                Text("Ж").frame(width: 30, alignment: .leading)
+                                Text("У").frame(width: 30, alignment: .leading)
                             }
                             .font(.caption2.bold())
                             .foregroundColor(.secondary)
 
                             ForEach($itemDrafts) { $draft in
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text(draft.item.name).font(.subheadline.bold())
-                                    HStack(spacing: 4) {
-                                        TextField("0", text: $draft.grams)
-                                            .keyboardType(.decimalPad)
-                                            .frame(width: 60)
-                                            .onChange(of: draft.grams) { _, _ in
-                                                unlockDraft(draft.id)
-                                                recalculateMacrosIfNeeded(for: draft.id)
-                                            }
-                                        TextField("ккал", text: $draft.calories)
-                                            .keyboardType(.decimalPad)
-                                            .frame(width: 44)
-                                            .multilineTextAlignment(.leading)
-                                            .onChange(of: draft.calories) { _, _ in markDraftLocked(draft.id) }
-                                        TextField("Б", text: $draft.proteins)
-                                            .keyboardType(.decimalPad)
-                                            .frame(width: 44)
-                                            .multilineTextAlignment(.leading)
-                                            .onChange(of: draft.proteins) { _, _ in markDraftLocked(draft.id) }
-                                        TextField("Ж", text: $draft.fats)
-                                            .keyboardType(.decimalPad)
-                                            .frame(width: 44)
-                                            .multilineTextAlignment(.leading)
-                                            .onChange(of: draft.fats) { _, _ in markDraftLocked(draft.id) }
-                                        TextField("У", text: $draft.carbs)
-                                            .keyboardType(.decimalPad)
-                                            .frame(width: 44)
-                                            .multilineTextAlignment(.leading)
-                                            .onChange(of: draft.carbs) { _, _ in markDraftLocked(draft.id) }
-                                    }
+                                HStack(spacing: 4) {
+                                    Text(draft.item.name)
+                                        .font(.subheadline.bold())
+                                        .lineLimit(2)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    TextField("0", text: $draft.grams)
+                                        .keyboardType(.decimalPad)
+                                        .frame(width: 44)
+                                        .onChange(of: draft.grams) { _, _ in
+                                            unlockDraft(draft.id)
+                                            recalculateMacrosIfNeeded(for: draft.id)
+                                        }
+                                    TextField("ккал", text: $draft.calories)
+                                        .keyboardType(.decimalPad)
+                                        .frame(width: 40)
+                                        .multilineTextAlignment(.leading)
+                                        .onChange(of: draft.calories) { _, _ in markDraftLocked(draft.id) }
+                                    TextField("Б", text: $draft.proteins)
+                                        .keyboardType(.decimalPad)
+                                        .frame(width: 30)
+                                        .multilineTextAlignment(.leading)
+                                        .onChange(of: draft.proteins) { _, _ in markDraftLocked(draft.id) }
+                                    TextField("Ж", text: $draft.fats)
+                                        .keyboardType(.decimalPad)
+                                        .frame(width: 30)
+                                        .multilineTextAlignment(.leading)
+                                        .onChange(of: draft.fats) { _, _ in markDraftLocked(draft.id) }
+                                    TextField("У", text: $draft.carbs)
+                                        .keyboardType(.decimalPad)
+                                        .frame(width: 30)
+                                        .multilineTextAlignment(.leading)
+                                        .onChange(of: draft.carbs) { _, _ in markDraftLocked(draft.id) }
                                 }
                             }
                         }
@@ -714,10 +803,10 @@ struct MealEventEditorView: View {
                             id: item.persistentModelID,
                             item: item,
                             grams: Self.format(item.grams),
-                            calories: Self.format(item.estimatedCalories),
-                            proteins: Self.format(item.estimatedProteins),
-                            fats: Self.format(item.estimatedFats),
-                            carbs: Self.format(item.estimatedCarbs),
+                            calories: Self.formatWhole(item.estimatedCalories),
+                            proteins: Self.formatWhole(item.estimatedProteins),
+                            fats: Self.formatWhole(item.estimatedFats),
+                            carbs: Self.formatWhole(item.estimatedCarbs),
                             macrosLocked: item.macrosLocked
                         )
                     }
@@ -751,8 +840,11 @@ struct MealEventEditorView: View {
     }
 
     private func reestimate() {
-        let text = textDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        let text = MemoryEngine.normalizeForSync(textDraft)
+        guard text.count >= 3 else { return }
+        if let baseline = event.baselineTextNormalized, baseline == text {
+            return
+        }
 
         isSubmitting = true
         errorText = ""
@@ -791,6 +883,8 @@ struct MealEventEditorView: View {
                     event.estimationSchemaVersion = result.parsed.estimationSchemaVersion
                     event.structureSource = .llm
                     event.outOfSync = false
+                    event.baselineTextNormalized = text
+                    event.structureLastSyncedAt = Date()
                     event.rawPayload = result.rawPayload
                     event.rawPayloadCreatedAt = Date()
                     event.parseErrorSummary = nil
@@ -804,8 +898,9 @@ struct MealEventEditorView: View {
                     event.parseErrorSummary = error.localizedDescription
                     event.applyTotals(calories: oldTotals.0, proteins: oldTotals.1, fats: oldTotals.2, carbs: oldTotals.3)
                     event.structureSource = .llm
+                    event.outOfSync = true
                     try? modelContext.save()
-                    errorText = "Не удалось обновить оценку. Исправьте текст и попробуйте снова."
+                    errorText = "Не удалось обновить оценку. Можно сохранить текущее состояние без пересчёта."
                     isSubmitting = false
                 }
             }
@@ -839,7 +934,7 @@ struct MealEventEditorView: View {
         event.applyTotals(calories: totals.calories, proteins: totals.proteins, fats: totals.fats, carbs: totals.carbs)
         event.memoryApplied = false
         event.structureSource = .manualOverride
-        event.outOfSync = false
+        EstimationRuntime.applyHighCalorieFlags(for: event)
         MemoryEngine.upsertPrimarySuggestion(
             text: event.rawText ?? "",
             totals: (
@@ -848,6 +943,7 @@ struct MealEventEditorView: View {
                 fats: totals.fats,
                 carbs: totals.carbs
             ),
+            items: event.estimateItems,
             context: modelContext
         )
         try? modelContext.save()
@@ -866,14 +962,14 @@ struct MealEventEditorView: View {
     private var requiresOutOfSyncDecision: Bool {
         MemoryPresentation.shouldPromptOutOfSync(
             source: event.structureSource,
-            selectedText: event.rawText,
+            selectedText: event.baselineTextNormalized,
             currentText: textDraft
         )
     }
 
     private func keepStructureAsSourceOfTruth() {
-        event.userNote = textDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        event.outOfSync = true
+        event.userNote = MemoryEngine.normalizeForSync(textDraft)
+        event.outOfSync = MemoryEngine.isOutOfSync(selectedText: event.baselineTextNormalized, currentText: textDraft)
         try? modelContext.save()
         dismiss()
     }
@@ -901,10 +997,10 @@ struct MealEventEditorView: View {
         let base = itemDrafts[index].item
         let baseline = max(0.1, base.baseGrams)
         let scale = grams / baseline
-        itemDrafts[index].calories = Self.format(base.baseCalories * scale)
-        itemDrafts[index].proteins = Self.format(base.baseProteins * scale)
-        itemDrafts[index].fats = Self.format(base.baseFats * scale)
-        itemDrafts[index].carbs = Self.format(base.baseCarbs * scale)
+        itemDrafts[index].calories = Self.formatWhole(base.baseCalories * scale)
+        itemDrafts[index].proteins = Self.formatWhole(base.baseProteins * scale)
+        itemDrafts[index].fats = Self.formatWhole(base.baseFats * scale)
+        itemDrafts[index].carbs = Self.formatWhole(base.baseCarbs * scale)
     }
 
     private func unlockDraft(_ id: PersistentIdentifier) {
@@ -919,6 +1015,7 @@ struct MealEventEditorView: View {
         event.status = .pendingEstimation
         event.parseErrorSummary = nil
         event.outOfSync = true
+        event.structureLastSyncedAt = nil
         for oldItem in oldItems {
             modelContext.delete(oldItem)
         }
@@ -930,6 +1027,10 @@ struct MealEventEditorView: View {
             return String(Int(value))
         }
         return String(format: "%.1f", value)
+    }
+
+    private static func formatWhole(_ value: Double) -> String {
+        String(Int(value.rounded()))
     }
 }
 
@@ -1086,18 +1187,33 @@ struct LogSheetView: View {
     }
 
     private func completeSave() {
-        let trimmed = logText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        let trimmed = MemoryEngine.normalizeForSync(logText)
+        guard trimmed.count >= 3 else { return }
 
         let draftStructure: DashboardView.ManualDraftStructure?
         if let selectedSuggestion {
             let adjusted = adjustedByPortion(base: selectedSuggestion)
+            let portionScale = selectedPortionScale(base: selectedSuggestion)
             draftStructure = DashboardView.ManualDraftStructure(
                 calories: adjusted.calories,
                 proteins: adjusted.proteins,
                 fats: adjusted.fats,
                 carbs: adjusted.carbs,
-                source: .memorySuggestion
+                source: .memorySuggestion,
+                sourceText: selectedSuggestion.text,
+                items: selectedSuggestion.items.map {
+                    DashboardView.ManualDraftStructure.DraftItem(
+                        name: $0.name,
+                        grams: max(1, $0.grams * portionScale),
+                        calories: max(0, $0.estimatedCalories * portionScale),
+                        proteins: max(0, $0.estimatedProteins * portionScale),
+                        fats: max(0, $0.estimatedFats * portionScale),
+                        carbs: max(0, $0.estimatedCarbs * portionScale),
+                        impactScore: $0.impactScore,
+                        reason: $0.reason,
+                        highCalorieFlag: $0.highCalorieFlag
+                    )
+                }
             )
             MemoryEngine.confirmDataGap(
                 fingerprint: selectedSuggestion.canonicalKey,
@@ -1111,7 +1227,8 @@ struct LogSheetView: View {
             DashboardView.LogDraftResult(
                 text: trimmed,
                 draftStructure: draftStructure,
-                treatTextAsNote: saveMode == .keepDraftStructure
+                treatTextAsNote: saveMode == .keepDraftStructure,
+                keepStructureWithoutReestimate: saveMode == .keepDraftStructure
             )
         )
         dismiss()
@@ -1143,16 +1260,22 @@ struct LogSheetView: View {
     }
 
     private func adjustedByPortion(base: MemoryEngine.SuggestionViewModel) -> (calories: Double, proteins: Double, fats: Double, carbs: Double) {
-        guard let grams = selectedPortionGrams else {
+        let scale = selectedPortionScale(base: base)
+        guard scale != 1 else {
             return (base.calories, base.proteins, base.fats, base.carbs)
         }
-        let scale = Double(grams) / 300.0
         return (
             max(0, base.calories * scale),
             max(0, base.proteins * scale),
             max(0, base.fats * scale),
             max(0, base.carbs * scale)
         )
+    }
+
+    private func selectedPortionScale(base: MemoryEngine.SuggestionViewModel) -> Double {
+        guard let grams = selectedPortionGrams else { return 1 }
+        let baseGrams = max(1.0, base.items.reduce(0) { $0 + $1.grams })
+        return Double(grams) / baseGrams
     }
 }
 

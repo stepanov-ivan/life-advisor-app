@@ -3,6 +3,19 @@ import SwiftData
 
 enum MemoryEngine {
     private static let day: TimeInterval = 24 * 60 * 60
+    private static let minNormalizedTextLength = 3
+
+    struct SuggestionItem: Codable {
+        let name: String
+        let grams: Double
+        let estimatedCalories: Double
+        let estimatedProteins: Double
+        let estimatedFats: Double
+        let estimatedCarbs: Double
+        let impactScore: Double
+        let reason: String
+        let highCalorieFlag: Bool
+    }
 
     struct SuggestionViewModel {
         let canonicalKey: String
@@ -12,6 +25,7 @@ enum MemoryEngine {
         let fats: Double
         let carbs: Double
         let source: StructureSource
+        let items: [SuggestionItem]
     }
 
     static func normalize(_ text: String) -> String {
@@ -22,9 +36,15 @@ enum MemoryEngine {
             .joined(separator: " ")
     }
 
+    static func normalizeForSync(_ text: String) -> String {
+        text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+    }
+
     static func isOutOfSync(selectedText: String?, currentText: String) -> Bool {
         guard let selectedText else { return false }
-        return normalize(selectedText) != normalize(currentText)
+        return normalizeForSync(selectedText) != normalizeForSync(currentText)
     }
 
     static func topSuggestions(
@@ -36,18 +56,23 @@ enum MemoryEngine {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalizedQuery.isEmpty else { return [] }
 
-        var grouped: [String: (count: Int, lastSeen: Date, text: String, totals: (Double, Double, Double, Double), source: StructureSource)] = [:]
+        var grouped: [String: (count: Int, lastSeen: Date, text: String, totals: (Double, Double, Double, Double), source: StructureSource, items: [SuggestionItem])] = [:]
 
         for suggestion in suggestions where !suggestion.isCandidate {
+            let normalizedSourceText = normalizeForSync(suggestion.sourceText)
+            let decodedItems = decodeSuggestionItems(suggestion.itemsPayload)
+            guard normalizedSourceText.count >= minNormalizedTextLength, !decodedItems.isEmpty else { continue }
+
             let canonicalMatch = suggestion.displayText.lowercased().contains(normalizedQuery) || suggestion.canonicalKey.contains(normalize(normalizedQuery))
             let aliasMatch = suggestion.aliases.contains(where: { $0.text.lowercased().contains(normalizedQuery) || normalize($0.text).contains(normalize(normalizedQuery)) })
             guard canonicalMatch || aliasMatch else { continue }
             grouped[suggestion.canonicalKey] = (
                 suggestion.usageCount,
                 suggestion.lastUsedAt,
-                suggestion.displayText,
+                suggestion.sourceText,
                 (suggestion.calories, suggestion.proteins, suggestion.fats, suggestion.carbs),
-                .memorySuggestion
+                .memorySuggestion,
+                decodedItems
             )
         }
 
@@ -60,7 +85,9 @@ enum MemoryEngine {
             }
 
         for (event, text) in candidates {
-            let key = normalize(text)
+            let normalizedText = normalizeForSync(text)
+            guard normalizedText.count >= minNormalizedTextLength else { continue }
+            let key = normalize(normalizedText)
             guard !key.isEmpty else { continue }
             let current = grouped[key]
             let newCount = (current?.count ?? 0) + 1
@@ -68,9 +95,10 @@ enum MemoryEngine {
             grouped[key] = (
                 newCount,
                 lastSeen,
-                text,
+                normalizedText,
                 (event.calories, event.proteins, event.fats, event.carbs),
-                current?.source ?? event.structureSource
+                current?.source ?? event.structureSource,
+                current?.items ?? suggestionItems(from: event.estimateItems)
             )
         }
 
@@ -94,7 +122,8 @@ enum MemoryEngine {
                 proteins: value.totals.1,
                 fats: value.totals.2,
                 carbs: value.totals.3,
-                source: value.source
+                source: value.source,
+                items: value.items
             )
             matched.append((score, vm))
         }
@@ -220,9 +249,16 @@ enum MemoryEngine {
     static func upsertPrimarySuggestion(
         text: String,
         totals: (calories: Double, proteins: Double, fats: Double, carbs: Double),
+        items: [EstimateItem],
         context: ModelContext
     ) {
-        let key = normalize(text)
+        let normalizedSourceText = normalizeForSync(text)
+        guard normalizedSourceText.count >= minNormalizedTextLength else { return }
+        let snapshotItems = suggestionItems(from: items)
+        guard !snapshotItems.isEmpty else { return }
+        let payload = encodeSuggestionItems(snapshotItems)
+
+        let key = normalize(normalizedSourceText)
         guard !key.isEmpty else { return }
 
         let canonicalKey = key
@@ -234,7 +270,9 @@ enum MemoryEngine {
 
         let primary = try? context.fetch(descriptor).first(where: { !$0.isCandidate })
         if let primary {
-            primary.displayText = text
+            primary.displayText = normalizedSourceText
+            primary.sourceText = normalizedSourceText
+            primary.itemsPayload = payload
             primary.usageCount += 1
             primary.lastUsedAt = Date()
             if EstimationRuntime.shouldUpdatePrimarySuggestion(oldCalories: primary.calories, newCalories: totals.calories) {
@@ -243,15 +281,15 @@ enum MemoryEngine {
                 primary.fats = totals.fats
                 primary.carbs = totals.carbs
             } else {
-                saveCandidate(for: primary, text: text, totals: totals, context: context)
+                saveCandidate(for: primary, text: normalizedSourceText, totals: totals, itemsPayload: payload, context: context)
             }
-            ensureAlias(key: key, text: text, primary: primary, context: context)
+            ensureAlias(key: key, text: normalizedSourceText, primary: primary, context: context)
             return
         }
 
         let created = MemorySuggestion(
             canonicalKey: key,
-            displayText: text,
+            displayText: normalizedSourceText,
             calories: totals.calories,
             proteins: totals.proteins,
             fats: totals.fats,
@@ -261,10 +299,12 @@ enum MemoryEngine {
             version: 1,
             isFallback: false,
             isCandidate: false,
-            candidateCount: 0
+            candidateCount: 0,
+            sourceText: normalizedSourceText,
+            itemsPayload: payload
         )
         context.insert(created)
-        ensureAlias(key: key, text: text, primary: created, context: context)
+        ensureAlias(key: key, text: normalizedSourceText, primary: created, context: context)
     }
 
     private static func ensureAlias(
@@ -293,6 +333,7 @@ enum MemoryEngine {
         for primary: MemorySuggestion,
         text: String,
         totals: (calories: Double, proteins: Double, fats: Double, carbs: Double),
+        itemsPayload: String?,
         context: ModelContext
     ) {
         let canonicalKey = primary.canonicalKey
@@ -322,7 +363,9 @@ enum MemoryEngine {
             version: primary.version + 1,
             isFallback: false,
             isCandidate: true,
-            candidateCount: 1
+            candidateCount: 1,
+            sourceText: text,
+            itemsPayload: itemsPayload
         )
         context.insert(candidate)
     }
@@ -389,5 +432,37 @@ enum MemoryEngine {
         if let gaps = try? context.fetch(FetchDescriptor<MemoryDataGap>()) {
             for gap in gaps { context.delete(gap) }
         }
+    }
+
+    static func suggestionItems(from estimateItems: [EstimateItem]) -> [SuggestionItem] {
+        estimateItems.map {
+            SuggestionItem(
+                name: $0.name,
+                grams: $0.grams,
+                estimatedCalories: $0.estimatedCalories,
+                estimatedProteins: $0.estimatedProteins,
+                estimatedFats: $0.estimatedFats,
+                estimatedCarbs: $0.estimatedCarbs,
+                impactScore: $0.impactScore,
+                reason: $0.reason,
+                highCalorieFlag: $0.highCalorieFlag
+            )
+        }
+    }
+
+    static func encodeSuggestionItems(_ items: [SuggestionItem]) -> String? {
+        guard let data = try? JSONEncoder().encode(items) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func decodeSuggestionItems(_ payload: String?) -> [SuggestionItem] {
+        guard
+            let payload,
+            let data = payload.data(using: .utf8),
+            let items = try? JSONDecoder().decode([SuggestionItem].self, from: data)
+        else {
+            return []
+        }
+        return items.filter { !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.grams > 0 }
     }
 }

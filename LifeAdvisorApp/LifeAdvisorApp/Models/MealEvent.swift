@@ -44,6 +44,8 @@ final class MealEvent {
     var memoryApplied: Bool
     var structureSourceRaw: String
     var outOfSync: Bool
+    var baselineTextNormalized: String?
+    var structureLastSyncedAt: Date?
     var userNote: String?
 
     @Relationship(deleteRule: .cascade, inverse: \EstimateItem.mealEvent)
@@ -85,6 +87,8 @@ final class MealEvent {
         self.memoryApplied = false
         self.structureSourceRaw = StructureSource.llm.rawValue
         self.outOfSync = false
+        self.baselineTextNormalized = nil
+        self.structureLastSyncedAt = nil
     }
 
     func applyTotals(calories: Double, proteins: Double, fats: Double, carbs: Double) {

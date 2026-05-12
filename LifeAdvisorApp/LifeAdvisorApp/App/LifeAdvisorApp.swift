@@ -4,10 +4,14 @@ import SwiftData
 @main
 struct LifeAdvisorApp: App {
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    private static let schemaResetVersion = "unify-memory-meal-structure-v1"
+    private static let schemaResetVersionKey = "storage_schema_reset_version"
 
     let modelContainer: ModelContainer
 
     init() {
+        Self.applyOneShotSchemaResetIfNeeded()
+
         let schema = Schema([
             MealEvent.self,
             EstimateItem.self,
@@ -156,5 +160,13 @@ struct LifeAdvisorApp: App {
                 try? fm.removeItem(at: file)
             }
         }
+    }
+
+    private static func applyOneShotSchemaResetIfNeeded() {
+        let defaults = UserDefaults.standard
+        let current = defaults.string(forKey: schemaResetVersionKey)
+        guard current != schemaResetVersion else { return }
+        deleteKnownSwiftDataStoreFiles()
+        defaults.set(schemaResetVersion, forKey: schemaResetVersionKey)
     }
 }

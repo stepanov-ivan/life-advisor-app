@@ -23,6 +23,8 @@ final class MemorySuggestion {
     var isFallback: Bool
     var isCandidate: Bool
     var candidateCount: Int
+    var sourceText: String
+    var itemsPayload: String?
 
     @Relationship(deleteRule: .cascade, inverse: \MemorySuggestionAlias.suggestion)
     var aliases: [MemorySuggestionAlias] = []
@@ -39,7 +41,9 @@ final class MemorySuggestion {
         version: Int = 1,
         isFallback: Bool = false,
         isCandidate: Bool = false,
-        candidateCount: Int = 0
+        candidateCount: Int = 0,
+        sourceText: String,
+        itemsPayload: String? = nil
     ) {
         self.id = UUID()
         self.canonicalKey = canonicalKey
@@ -54,6 +58,8 @@ final class MemorySuggestion {
         self.isFallback = isFallback
         self.isCandidate = isCandidate
         self.candidateCount = candidateCount
+        self.sourceText = sourceText
+        self.itemsPayload = itemsPayload
     }
 }
 

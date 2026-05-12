@@ -63,7 +63,9 @@ final class EstimationRuntimeTests: XCTestCase {
             calories: 600,
             proteins: 20,
             fats: 20,
-            carbs: 70
+            carbs: 70,
+            sourceText: "a b",
+            itemsPayload: nil
         )
 
         let applied = EstimationRuntime.applySuggestionPrior(totals: totals, suggestion: memory)
@@ -81,8 +83,9 @@ final class EstimationRuntimeTests: XCTestCase {
     }
 
     func testOutOfSyncDetection() {
-        XCTAssertFalse(MemoryEngine.isOutOfSync(selectedText: "Кефир 2.5 300г", currentText: "кефир 2.5% 300г"))
+        XCTAssertTrue(MemoryEngine.isOutOfSync(selectedText: "Кефир 2.5 300г", currentText: "кефир 2.5% 300г"))
         XCTAssertTrue(MemoryEngine.isOutOfSync(selectedText: "Биг мак", currentText: "Биг тейсти"))
+        XCTAssertFalse(MemoryEngine.isOutOfSync(selectedText: "овсянка  200г", currentText: "овсянка 200г"))
     }
 
     func testSuggestionLimitAndRanking() {
@@ -158,30 +161,49 @@ final class EstimationRuntimeTests: XCTestCase {
     func testCandidatePromotionAndVersionLimit() throws {
         let container = try makeContainer()
         let context = container.mainContext
+        let meal = MealEvent(windowLabel: "Тест", status: .structured, rawText: "Кефир 300г")
+        let sampleItem = EstimateItem(
+            name: "Кефир",
+            estimatedCalories: 150,
+            estimatedProteins: 9,
+            estimatedFats: 7,
+            estimatedCarbs: 12,
+            impactScore: 0.4,
+            reason: "ok",
+            highCalorieFlag: false,
+            sourceMode: .ingredientBreakdown,
+            grams: 300
+        )
+        sampleItem.mealEvent = meal
 
         MemoryEngine.upsertPrimarySuggestion(
             text: "Кефир 300г",
             totals: (calories: 150, proteins: 9, fats: 7, carbs: 12),
+            items: [sampleItem],
             context: context
         )
         MemoryEngine.upsertPrimarySuggestion(
             text: "Кефир 300г",
             totals: (calories: 280, proteins: 12, fats: 10, carbs: 20),
+            items: [sampleItem],
             context: context
         )
         MemoryEngine.upsertPrimarySuggestion(
             text: "Кефир 300г",
             totals: (calories: 280, proteins: 12, fats: 10, carbs: 20),
+            items: [sampleItem],
             context: context
         )
         MemoryEngine.upsertPrimarySuggestion(
             text: "Кефир 300г",
             totals: (calories: 320, proteins: 15, fats: 12, carbs: 24),
+            items: [sampleItem],
             context: context
         )
         MemoryEngine.upsertPrimarySuggestion(
             text: "Кефир 300г",
             totals: (calories: 320, proteins: 15, fats: 12, carbs: 24),
+            items: [sampleItem],
             context: context
         )
         try context.save()

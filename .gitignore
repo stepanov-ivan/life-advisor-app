@@ -1,2 +1,6 @@
+.DS_Store
+*.xcuserdata
+*.xcuserstate
+xcuserdata/
 LifeAdvisorApp/LifeAdvisorApp.xcodeproj/
 LifeAdvisorApp/LifeAdvisorApp.xcodeproj/project.xcworkspace/xcuserdata/ivan.xcuserdatad/UserInterfaceState.xcuserstate

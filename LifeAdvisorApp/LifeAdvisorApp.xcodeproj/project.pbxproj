@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		41256AFD2FC4EF770006FBAA /* RuleEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41256AFC2FC4EF770006FBAA /* RuleEngineTests.swift */; };
 		A1B2C3D4E5F6A1B2C3D4E5F6 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C1B2C3D4E5F6C1B2C3D4E5F2 /* SwiftUI.framework */; };
 		A1B2C3D4E5F6A1B2C3D4E5F7 /* SwiftData.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C1B2C3D4E5F6C1B2C3D4E5F3 /* SwiftData.framework */; };
 		A37C8BC8F5E2A6888498FE23 /* LLMContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F4EBF740500E7FE5EAA5321 /* LLMContractTests.swift */; };
@@ -26,6 +27,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		41256AFC2FC4EF770006FBAA /* RuleEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuleEngineTests.swift; sourceTree = "<group>"; };
 		569718750664E9C30CC461F1 /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/XCTest.framework; sourceTree = DEVELOPER_DIR; };
 		7C05712DB950A201BBFA95FD /* EstimationRuntimeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EstimationRuntimeTests.swift; path = LifeAdvisorAppTests/EstimationRuntimeTests.swift; sourceTree = "<group>"; };
 		7EB94E6B0F1C758B723F72BB /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
@@ -71,6 +73,7 @@
 			children = (
 				8F4EBF740500E7FE5EAA5321 /* LLMContractTests.swift */,
 				7C05712DB950A201BBFA95FD /* EstimationRuntimeTests.swift */,
+				41256AFC2FC4EF770006FBAA /* RuleEngineTests.swift */,
 			);
 			name = LifeAdvisorAppTests;
 			sourceTree = "<group>";
@@ -243,6 +246,7 @@
 			files = (
 				A37C8BC8F5E2A6888498FE23 /* LLMContractTests.swift in Sources */,
 				CC0E10A757F9FE93365DCE4F /* EstimationRuntimeTests.swift in Sources */,
+				41256AFD2FC4EF770006FBAA /* RuleEngineTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

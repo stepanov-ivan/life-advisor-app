@@ -19,6 +19,11 @@ final class EstimateItem {
     var baseFats: Double
     var baseCarbs: Double
     var macrosLocked: Bool
+    var estimatedSaturatedFats: Double
+    var estimatedSugar: Double
+    var estimatedFiber: Double
+    var estimatedSodium: Double
+    var foodCategory: String?
 
     var mealEvent: MealEvent?
 
@@ -37,7 +42,12 @@ final class EstimateItem {
         reason: String,
         highCalorieFlag: Bool,
         sourceMode: EstimateSourceMode,
-        grams: Double = 100
+        grams: Double = 100,
+        estimatedSaturatedFats: Double = 0,
+        estimatedSugar: Double = 0,
+        estimatedFiber: Double = 0,
+        estimatedSodium: Double = 0,
+        foodCategory: String? = nil
     ) {
         self.name = name
         self.estimatedCalories = estimatedCalories
@@ -55,5 +65,10 @@ final class EstimateItem {
         self.baseFats = estimatedFats
         self.baseCarbs = estimatedCarbs
         self.macrosLocked = false
+        self.estimatedSaturatedFats = estimatedSaturatedFats
+        self.estimatedSugar = estimatedSugar
+        self.estimatedFiber = estimatedFiber
+        self.estimatedSodium = estimatedSodium
+        self.foodCategory = foodCategory
     }
 }

@@ -4,7 +4,7 @@ import SwiftData
 @main
 struct LifeAdvisorApp: App {
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
-    private static let schemaResetVersion = "unify-memory-meal-structure-v1"
+    private static let schemaResetVersion = "nutrition-rules-v1"
     private static let schemaResetVersionKey = "storage_schema_reset_version"
 
     let modelContainer: ModelContainer
@@ -21,7 +21,9 @@ struct LifeAdvisorApp: App {
             MemoryDataGap.self,
             MealWindow.self,
             DailyAdvice.self,
-            Recommendation.self
+            Recommendation.self,
+            NutritionRuleConfig.self,
+            RuleViolation.self
         ])
 
         let configuration = ModelConfiguration(

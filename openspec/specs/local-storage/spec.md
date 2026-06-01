@@ -1,4 +1,8 @@
-## MODIFIED Requirements
+## Purpose
+
+Локальное хранение данных питания через SwiftData: приёмы, состав, память, правила и нарушения.
+
+## Requirements
 
 ### Requirement: Модель MealEvent
 Система SHALL хранить для `MealEvent` источник структуры (`memory_suggestion`/`llm`/`manual_override`) и флаг синхронности текста и структуры (`out_of_sync`).
@@ -34,8 +38,6 @@
 - **WHEN** число версий шаблона в canonical-группе превышает 3
 - **THEN** система удаляет самые старые fallback-версии и сохраняет только текущую и 2 последние fallback
 
-## ADDED Requirements
-
 ### Requirement: Data-gap хранилище
 Система SHALL хранить записи `data-gap`, закрывать их автоматически после 2 подтверждённых уточнений по похожему блюду и удалять неактивные записи через 60 дней.
 
@@ -57,3 +59,40 @@
 #### Scenario: Retention неподтверждённой гипотезы
 - **WHEN** гипотеза находится в `pending_confirmation` и не обновлялась 60 дней
 - **THEN** система удаляет эту гипотезу
+
+### Requirement: SwiftData-сущность NutritionRuleConfig
+Система SHALL хранить настройки включения/выключения правил в SwiftData-модели `NutritionRuleConfig` с полями `ruleId: String` и `isEnabled: Bool`.
+
+#### Scenario: Создание конфига для нового правила
+- **WHEN** RuleEngine встречает правило из JSON, для которого нет `NutritionRuleConfig`
+- **THEN** система создаёт новую запись с `isEnabled = true`
+
+#### Scenario: Удаление конфига для удалённого правила
+- **WHEN** правило удалено из JSON
+- **THEN** соответствующий `NutritionRuleConfig` удаляется при следующей загрузке
+
+### Requirement: SwiftData-сущность RuleViolation
+Система SHALL хранить нарушения правил в SwiftData-модели `RuleViolation` с полями: `ruleId: String`, `date: Date`, `zone: String`, `magnitude: Double`, `reasonCode: String`, и связями `@Relationship` на `MealEvent?` и `EstimateItem?`.
+
+#### Scenario: Создание нарушения с привязкой к приёму
+- **WHEN** правило нарушено и нарушение связано с конкретным приёмом
+- **THEN** `RuleViolation` сохраняется с `mealEvent` и `estimateItem` ссылками
+
+#### Scenario: Каскадное удаление при удалении MealEvent
+- **WHEN** `MealEvent` удаляется
+- **THEN** связанные `RuleViolation` удаляются автоматически
+
+### Requirement: Новые поля в EstimateItem
+Система SHALL добавить опциональные поля в `EstimateItem`: `estimatedSaturatedFats`, `estimatedSugar`, `estimatedFiber`, `estimatedSodium` (все `Double`) и `foodCategory: String?`.
+
+#### Scenario: LLM вернул все новые поля
+- **WHEN** LLM возвращает saturated_fats, sugar, fiber, sodium и food_category для ингредиента
+- **THEN** все поля сохраняются в `EstimateItem`
+
+#### Scenario: LLM не вернул часть полей
+- **WHEN** LLM возвращает только часть новых полей
+- **THEN** отсутствующие поля сохраняются как `nil` или `0`, не ломая сохранение
+
+#### Scenario: Старый приём без новых полей
+- **WHEN** приём был создан до добавления новых полей
+- **THEN** значения по умолчанию (0/Double или nil) не вызывают ошибок при агрегации

@@ -41,6 +41,35 @@ enum LLMClient {
         let proteins: Double
         let fats: Double
         let carbs: Double
+        let saturatedFats: Double?
+        let sugar: Double?
+        let fiber: Double?
+        let sodium: Double?
+
+        enum CodingKeys: String, CodingKey {
+            case calories, proteins, fats, carbs, sugar, fiber, sodium
+            case saturatedFats = "saturated_fats"
+        }
+
+        init(
+            calories: Double,
+            proteins: Double,
+            fats: Double,
+            carbs: Double,
+            saturatedFats: Double? = nil,
+            sugar: Double? = nil,
+            fiber: Double? = nil,
+            sodium: Double? = nil
+        ) {
+            self.calories = calories
+            self.proteins = proteins
+            self.fats = fats
+            self.carbs = carbs
+            self.saturatedFats = saturatedFats
+            self.sugar = sugar
+            self.fiber = fiber
+            self.sodium = sodium
+        }
     }
 
     struct EstimateItemResult: Decodable {
@@ -53,14 +82,59 @@ enum LLMClient {
         let impactScore: Double
         let reason: String
         let highCalorieFlag: Bool
+        let saturatedFats: Double?
+        let sugar: Double?
+        let fiber: Double?
+        let sodium: Double?
+        let foodCategory: String?
 
         enum CodingKeys: String, CodingKey {
-            case name, grams, estimatedCalories, estimatedProteins, estimatedFats, estimatedCarbs, reason
+            case name, grams, estimatedCalories, estimatedProteins, estimatedFats, estimatedCarbs, reason, sugar, fiber, sodium
             case impactScore = "impact_score"
             case highCalorieFlag = "high_calorie_flag"
+            case saturatedFats = "saturated_fats"
+            case foodCategory = "food_category"
+        }
+
+        init(
+            name: String,
+            grams: Double,
+            estimatedCalories: Double,
+            estimatedProteins: Double,
+            estimatedFats: Double,
+            estimatedCarbs: Double,
+            impactScore: Double,
+            reason: String,
+            highCalorieFlag: Bool,
+            saturatedFats: Double? = nil,
+            sugar: Double? = nil,
+            fiber: Double? = nil,
+            sodium: Double? = nil,
+            foodCategory: String? = nil
+        ) {
+            self.name = name
+            self.grams = grams
+            self.estimatedCalories = estimatedCalories
+            self.estimatedProteins = estimatedProteins
+            self.estimatedFats = estimatedFats
+            self.estimatedCarbs = estimatedCarbs
+            self.impactScore = impactScore
+            self.reason = reason
+            self.highCalorieFlag = highCalorieFlag
+            self.saturatedFats = saturatedFats
+            self.sugar = sugar
+            self.fiber = fiber
+            self.sodium = sodium
+            self.foodCategory = foodCategory
         }
 
         var clampedImpactScore: Double { min(1, max(0, impactScore)) }
+
+        var validFoodCategory: String? {
+            guard let cat = foodCategory else { return nil }
+            let valid = ["fruit", "vegetable", "whole_grain", "legume", "nut_seed", "red_meat", "processed_meat", "other"]
+            return valid.contains(cat) ? cat : "other"
+        }
     }
 
     struct EstimationResult: Decodable {
@@ -199,7 +273,13 @@ enum LLMClient {
         Формат:
         {
           "mode": "ingredient_breakdown|composite_item",
-          "totals": {"calories": number, "proteins": number, "fats": number, "carbs": number},
+          "totals": {
+            "calories": number, "proteins": number, "fats": number, "carbs": number,
+            "saturated_fats": number|null,
+            "sugar": number|null,
+            "fiber": number|null,
+            "sodium": number|null
+          },
           "confidence": "low|medium|high",
           "items": [{
             "name": string,            // ТОЛЬКО чистое имя продукта/блюда без количества, скобок, тильды и служебных слов
@@ -210,13 +290,25 @@ enum LLMClient {
             "estimatedCarbs": number,
             "impact_score": number,
             "reason": string,
-            "high_calorie_flag": bool
+            "high_calorie_flag": bool,
+            "saturated_fats": number|null,
+            "sugar": number|null,
+            "fiber": number|null,
+            "sodium": number|null,
+            "food_category": "fruit"|"vegetable"|"whole_grain"|"legume"|"nut_seed"|"red_meat"|"processed_meat"|"other"|null
           }],
           "assumptions": [string],
           "modelId": string,
-          "promptVersion": "v2",
-          "estimationSchemaVersion": "v2"
+          "promptVersion": "v3",
+          "estimationSchemaVersion": "v3"
         }
+        Дополнительные поля (опциональны, можно null):
+        - saturated_fats: насыщенные жиры в граммах
+        - sugar: свободный сахар в граммах
+        - fiber: клетчатка в граммах
+        - sodium: натрий в миллиграммах
+        - food_category: категория продукта (fruit, vegetable, whole_grain, legume, nut_seed, red_meat, processed_meat, other)
+
         Для каждого item:
         1) grams обязателен, не пропускай.
         2) Если точная граммовка неизвестна, всё равно оцени и укажи grams.

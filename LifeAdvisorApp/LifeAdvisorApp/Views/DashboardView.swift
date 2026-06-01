@@ -2,6 +2,8 @@ import SwiftUI
 import SwiftData
 
 struct DashboardView: View {
+    @Binding var selectedDate: Date
+
     struct ManualDraftStructure {
         struct DraftItem {
             var name: String
@@ -13,6 +15,11 @@ struct DashboardView: View {
             var impactScore: Double
             var reason: String
             var highCalorieFlag: Bool
+            var saturatedFats: Double = 0
+            var sugar: Double = 0
+            var fiber: Double = 0
+            var sodium: Double = 0
+            var foodCategory: String? = nil
         }
 
         var calories: Double
@@ -35,11 +42,11 @@ struct DashboardView: View {
     @Query(sort: \MealWindow.order) private var windows: [MealWindow]
     @StateObject private var notificationManager = NotificationManager.shared
     @AppStorage("dashboard_last_selected_day") private var lastSelectedDayKey = ""
+    @State private var ruleEngine = RuleEngine()
 
     @State private var selectedWindow: String?
     @State private var editingEvent: MealEvent?
     @State private var logText = ""
-    @State private var selectedDate = DashboardDateLogic.startOfDay(Date())
     @State private var showDatePicker = false
     @State private var showFutureDateHint = false
 
@@ -81,6 +88,7 @@ struct DashboardView: View {
                                 windowLabel: window.name,
                                 timeRange: "\(window.startTimeString)–\(window.endTimeString)",
                                 event: event,
+                                violations: event.flatMap { ruleEngine.violationsForMeal($0) } ?? [],
                                 onTap: {
                                     if let event {
                                         editingEvent = event
@@ -112,6 +120,8 @@ struct DashboardView: View {
             .navigationTitle("Дашборд")
             .onAppear {
                 restoreLastSelectedDate()
+                ruleEngine.configure(context: modelContext)
+                ruleEngine.resetWeekIfNeeded()
             }
             .onChange(of: notificationManager.pendingLogWindow) { _, value in
                 guard let value else { return }
@@ -131,7 +141,7 @@ struct DashboardView: View {
                 }
             }
             .sheet(item: $editingEvent) { event in
-                MealEventEditorView(event: event)
+                MealEventEditorView(event: event, violations: ruleEngine.violationsForMeal(event))
             }
             .sheet(isPresented: $showDatePicker) {
                 DatePickerSheet(
@@ -272,7 +282,12 @@ struct DashboardView: View {
                         estimatedCarbs: $0.carbs,
                         impactScore: $0.impactScore,
                         reason: $0.reason,
-                        highCalorieFlag: $0.highCalorieFlag
+                        highCalorieFlag: $0.highCalorieFlag,
+                        saturatedFats: $0.saturatedFats,
+                        sugar: $0.sugar,
+                        fiber: $0.fiber,
+                        sodium: $0.sodium,
+                        foodCategory: $0.foodCategory
                     )
                 },
                 mode: sourceMode.rawValue,
@@ -322,7 +337,12 @@ struct DashboardView: View {
                     estimatedCarbs: $0.estimatedCarbs,
                     impactScore: $0.impactScore,
                     reason: $0.reason,
-                    highCalorieFlag: $0.highCalorieFlag
+                    highCalorieFlag: $0.highCalorieFlag,
+                    saturatedFats: $0.saturatedFats,
+                    sugar: $0.sugar,
+                    fiber: $0.fiber,
+                    sodium: $0.sodium,
+                    foodCategory: $0.foodCategory
                 )
             }
             EstimationRuntime.overwriteSnapshot(
@@ -581,77 +601,6 @@ struct DashboardView: View {
     }
 }
 
-struct MealSlotCard: View {
-    let windowLabel: String
-    let timeRange: String
-    let event: MealEvent?
-    let onTap: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(windowLabel).font(.headline)
-                Spacer()
-                Text(timeRange).font(.caption).foregroundColor(.secondary)
-            }
-
-            if let event {
-                switch event.status {
-                case .skipped:
-                    Label("Пропущено", systemImage: "slash.circle")
-                        .foregroundColor(.secondary)
-                case .pendingEstimation:
-                    Label(event.rawText ?? "Оценка...", systemImage: "clock")
-                        .foregroundColor(.orange)
-                case .parseFailed:
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(event.rawText ?? "")
-                        Text("Последняя оценка не обновлена")
-                            .font(.caption)
-                            .foregroundColor(.orange)
-                    }
-                case .structured:
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("\(Int(event.calories)) ккал").font(.title3.bold())
-                        Text("Б: \(Int(event.proteins))г Ж: \(Int(event.fats))г У: \(Int(event.carbs))г")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        ForEach(event.estimateItems.prefix(3), id: \.persistentModelID) { item in
-                            HStack {
-                                Text(item.name).font(.caption)
-                                Spacer()
-                                Text("\(Int(item.estimatedCalories)) ккал").font(.caption2)
-                            }
-                            .foregroundColor(item.highCalorieFlag ? .red : .secondary)
-                        }
-                    }
-                case .empty:
-                    EmptyView()
-                }
-            } else {
-                Label("Записать приём пищи", systemImage: "plus.circle")
-                    .foregroundColor(.secondary)
-            }
-        }
-        .padding()
-        .background(backgroundColor)
-        .cornerRadius(12)
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onTap)
-    }
-
-    private var backgroundColor: Color {
-        guard let event else { return Color.gray.opacity(0.15) }
-        switch event.status {
-        case .empty: return Color.gray.opacity(0.15)
-        case .pendingEstimation: return Color.yellow.opacity(0.2)
-        case .structured: return Color.green.opacity(0.2)
-        case .parseFailed: return Color.orange.opacity(0.2)
-        case .skipped: return Color.gray.opacity(0.15)
-        }
-    }
-}
-
 struct MealEventEditorView: View {
     private struct ItemDraft: Identifiable {
         let id: PersistentIdentifier
@@ -668,6 +617,7 @@ struct MealEventEditorView: View {
     @Environment(\.dismiss) private var dismiss
 
     let event: MealEvent
+    let violations: [RuleViolation]
 
     @State private var textDraft = ""
     @State private var isSubmitting = false
@@ -739,6 +689,11 @@ struct MealEventEditorView: View {
 
                             ForEach($itemDrafts) { $draft in
                                 HStack(spacing: 4) {
+                                    if isItemViolating(draft.item) {
+                                        Image(systemName: "exclamationmark.circle.fill")
+                                            .foregroundColor(.red)
+                                            .font(.caption)
+                                    }
                                     Text(draft.item.name)
                                         .font(.subheadline.bold())
                                         .lineLimit(2)
@@ -1031,6 +986,10 @@ struct MealEventEditorView: View {
 
     private static func formatWhole(_ value: Double) -> String {
         String(Int(value.rounded()))
+    }
+
+    private func isItemViolating(_ item: EstimateItem) -> Bool {
+        violations.contains { $0.estimateItem?.persistentModelID == item.persistentModelID }
     }
 }
 

@@ -15,6 +15,11 @@ enum MemoryEngine {
         let impactScore: Double
         let reason: String
         let highCalorieFlag: Bool
+        var saturatedFats: Double = 0
+        var sugar: Double = 0
+        var fiber: Double = 0
+        var sodium: Double = 0
+        var foodCategory: String? = nil
     }
 
     struct SuggestionViewModel {
@@ -445,7 +450,12 @@ enum MemoryEngine {
                 estimatedCarbs: $0.estimatedCarbs,
                 impactScore: $0.impactScore,
                 reason: $0.reason,
-                highCalorieFlag: $0.highCalorieFlag
+                highCalorieFlag: $0.highCalorieFlag,
+                saturatedFats: $0.estimatedSaturatedFats,
+                sugar: $0.estimatedSugar,
+                fiber: $0.estimatedFiber,
+                sodium: $0.estimatedSodium,
+                foodCategory: $0.foodCategory
             )
         }
     }

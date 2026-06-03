@@ -169,7 +169,7 @@ struct RuleDetailView: View {
                             .font(.subheadline)
                     }
                 }
-                Text("Причина: \(violation.reasonCode)")
+                Text(engine.violationDescription(for: violation))
                     .font(.caption)
                     .foregroundColor(.secondary)
                 Text("Отклонение: \(String(format: "%.1f", violation.magnitude))")

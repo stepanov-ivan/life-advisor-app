@@ -2,9 +2,6 @@ import Foundation
 import SwiftData
 
 enum EstimationRuntime {
-    private static let minHighCalorieTotalKcal = 120.0
-    private static let minHighCalorieDensityPer100g = 250.0
-    private static let minHighCalorieGrams = 10.0
 
     static func applySuggestionPrior(
         totals: LLMClient.Totals,
@@ -49,7 +46,6 @@ enum EstimationRuntime {
                 estimatedCarbs: parsed.estimatedCarbs,
                 impactScore: parsed.clampedImpactScore,
                 reason: parsed.reason,
-                highCalorieFlag: parsed.highCalorieFlag,
                 sourceMode: mode == "ingredient_breakdown" ? .ingredientBreakdown : .compositeItem,
                 grams: parsed.grams,
                 estimatedSaturatedFats: parsed.saturatedFats ?? 0,
@@ -61,7 +57,6 @@ enum EstimationRuntime {
             estimateItem.mealEvent = event
             modelContext.insert(estimateItem)
         }
-        applyHighCalorieFlags(for: event)
     }
 
     static func lowConfidenceWarningVisible(_ confidence: String?) -> Bool {
@@ -73,16 +68,4 @@ enum EstimationRuntime {
         return abs(newCalories - oldCalories) / oldCalories <= 0.30
     }
 
-    static func isHighCalorie(item: EstimateItem) -> Bool {
-        guard item.grams >= minHighCalorieGrams else { return false }
-        guard item.estimatedCalories >= minHighCalorieTotalKcal else { return false }
-        let kcalPer100g = (item.estimatedCalories / max(0.1, item.grams)) * 100
-        return kcalPer100g >= minHighCalorieDensityPer100g
-    }
-
-    static func applyHighCalorieFlags(for event: MealEvent) {
-        for item in event.estimateItems {
-            item.highCalorieFlag = isHighCalorie(item: item)
-        }
-    }
 }

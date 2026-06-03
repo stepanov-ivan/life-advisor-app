@@ -166,7 +166,7 @@ final class RuleEngineTests: XCTestCase {
 
     func testValidRangeRule() {
         let json = """
-        {"id":"test","type":"range","field":"fatPercent","params":{"lower":0.15,"upper":0.30},"warningRatio":0.85,"category":"test","title":"Test","description":"Desc","window":"day","minDaysData":3}
+        {"id":"test","type":"range","field":"fatPercent","params":{"lower":0.15,"upper":0.30},"warningRatio":0.85,"category":"test","title":"Test","description":"Desc","window":"day"}
         """
         let rule = try? JSONDecoder().decode(RuleDefinition.self, from: Data(json.utf8))
         XCTAssertNotNil(rule)
@@ -177,7 +177,7 @@ final class RuleEngineTests: XCTestCase {
 
     func testValidPresenceRule() {
         let json = """
-        {"id":"test","type":"presence","field":null,"params":{"category":"whole_grain"},"warningRatio":0.85,"category":"test","title":"Test","description":"Desc","window":"day","minDaysData":3}
+        {"id":"test","type":"presence","field":null,"params":{"category":"whole_grain"},"warningRatio":0.85,"category":"test","title":"Test","description":"Desc","window":"day"}
         """
         let rule = try? JSONDecoder().decode(RuleDefinition.self, from: Data(json.utf8))
         XCTAssertNotNil(rule)
@@ -186,7 +186,7 @@ final class RuleEngineTests: XCTestCase {
 
     func testMissingOptionalFields() {
         let json = """
-        {"id":"test","type":"range","field":"fatPercent","params":{},"warningRatio":0.85,"category":"test","title":"Test","description":"Desc","window":"day","minDaysData":3}
+        {"id":"test","type":"range","field":"fatPercent","params":{},"warningRatio":0.85,"category":"test","title":"Test","description":"Desc","window":"day"}
         """
         let rule = try? JSONDecoder().decode(RuleDefinition.self, from: Data(json.utf8))
         XCTAssertNotNil(rule)
@@ -215,7 +215,6 @@ final class RuleEngineTests: XCTestCase {
             estimatedCarbs: 0,
             impactScore: 0.5,
             reason: "",
-            highCalorieFlag: false,
             sourceMode: .ingredientBreakdown,
             grams: 200
         )
@@ -280,7 +279,6 @@ final class RuleEngineTests: XCTestCase {
             estimatedCarbs: 10,
             impactScore: 0.5,
             reason: "",
-            highCalorieFlag: false,
             sourceMode: .ingredientBreakdown,
             grams: 100,
             foodCategory: category

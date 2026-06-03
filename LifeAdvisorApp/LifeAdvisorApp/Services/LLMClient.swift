@@ -105,7 +105,7 @@ enum LLMClient {
             estimatedCarbs: Double,
             impactScore: Double,
             reason: String,
-            highCalorieFlag: Bool,
+            highCalorieFlag: Bool = false,
             saturatedFats: Double? = nil,
             sugar: Double? = nil,
             fiber: Double? = nil,

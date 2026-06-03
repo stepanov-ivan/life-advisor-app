@@ -14,12 +14,6 @@ struct RulesListView: View {
                         systemImage: "exclamationmark.triangle",
                         description: Text(error)
                     )
-                } else if !engine.hasMinData() {
-                    ContentUnavailableView(
-                        "Недостаточно данных",
-                        systemImage: "chart.bar.xscale",
-                        description: Text("Нужно минимум 3 дня с приёмами пищи")
-                    )
                 } else {
                     rulesList
                 }
@@ -28,15 +22,15 @@ struct RulesListView: View {
             .onAppear {
                 engine.configure(context: modelContext)
                 engine.resetWeekIfNeeded()
-                engine.fullRebuild(for: Date())
+                engine.fullRebuild(for: engine.bestEvaluationDate())
             }
         }
     }
 
     private var rulesList: some View {
         let summary = engine.summary(date: Date())
-        let enabledRules = engine.enabledRules()
-        let grouped = Dictionary(grouping: enabledRules) { $0.categoryTitle }
+        let allRules = engine.allRules()
+        let grouped = Dictionary(grouping: allRules) { $0.categoryTitle }
 
         return List {
             // Summary

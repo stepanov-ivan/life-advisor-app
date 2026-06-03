@@ -13,7 +13,6 @@ final class EstimationRuntimeTests: XCTestCase {
             MemoryHypothesis.self,
             MemoryDataGap.self,
             MealWindow.self,
-            DailyAdvice.self,
             Recommendation.self
         ])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
@@ -170,7 +169,6 @@ final class EstimationRuntimeTests: XCTestCase {
             estimatedCarbs: 12,
             impactScore: 0.4,
             reason: "ok",
-            highCalorieFlag: false,
             sourceMode: .ingredientBreakdown,
             grams: 300
         )
@@ -244,7 +242,6 @@ final class EstimationRuntimeTests: XCTestCase {
             estimatedCarbs: 4,
             impactScore: 0.9,
             reason: "Высокая плотность калорий",
-            highCalorieFlag: true,
             sourceMode: .ingredientBreakdown
         )
         let factors = MemoryPresentation.explainabilityFactors(
@@ -276,7 +273,6 @@ final class EstimationRuntimeTests: XCTestCase {
             estimatedCarbs: 12,
             impactScore: 0.4,
             reason: "old",
-            highCalorieFlag: false,
             sourceMode: .compositeItem
         )
         old.mealEvent = event
@@ -293,7 +289,6 @@ final class EstimationRuntimeTests: XCTestCase {
                 estimatedCarbs: 28,
                 impactScore: 0.9,
                 reason: "new",
-                highCalorieFlag: true
             ),
             LLMClient.EstimateItemResult(
                 name: "new-2",
@@ -304,7 +299,6 @@ final class EstimationRuntimeTests: XCTestCase {
                 estimatedCarbs: 18,
                 impactScore: 0.3,
                 reason: "new",
-                highCalorieFlag: false
             )
         ]
 
@@ -332,7 +326,6 @@ final class EstimationRuntimeTests: XCTestCase {
             estimatedCarbs: 12,
             impactScore: 0.2,
             reason: "ok",
-            highCalorieFlag: false,
             sourceMode: .compositeItem
         )
         item.mealEvent = event
@@ -410,7 +403,6 @@ final class EstimationRuntimeTests: XCTestCase {
             estimatedCarbs: 4,
             impactScore: 0.4,
             reason: "Базовая оценка",
-            highCalorieFlag: false,
             sourceMode: .ingredientBreakdown,
             grams: 300.5
         )

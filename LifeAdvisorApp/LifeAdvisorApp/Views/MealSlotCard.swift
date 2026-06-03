@@ -5,22 +5,53 @@ struct MealSlotCard: View {
     let timeRange: String
     let event: MealEvent?
     let violations: [RuleViolation]
+    let engine: RuleEngine
     let onTap: () -> Void
+
+    private struct ProductViolation {
+        let ruleId: String
+        let ruleTitle: String
+        let percent: Double
+        let zone: String
+    }
+
+    private var productViolationMap: [String: [ProductViolation]] {
+        var map: [String: [ProductViolation]] = [:]
+        for violation in violations {
+            guard let json = violation.contributionJSON,
+                  let data = json.data(using: .utf8),
+                  let entries = try? JSONDecoder().decode([RuleEngine.ContributionEntry].self, from: data) else {
+                continue
+            }
+            let ruleDef = engine.allRules().first { $0.id == violation.ruleId }
+            let ruleTitle = ruleDef?.title ?? violation.ruleId
+            for entry in entries {
+                let pv = ProductViolation(
+                    ruleId: violation.ruleId,
+                    ruleTitle: ruleTitle,
+                    percent: entry.percent,
+                    zone: violation.zone
+                )
+                map[entry.itemId, default: []].append(pv)
+            }
+        }
+        return map
+    }
+
+    private func maxContributionPercent(for violation: RuleViolation) -> Double {
+        guard let json = violation.contributionJSON,
+              let data = json.data(using: .utf8),
+              let entries = try? JSONDecoder().decode([RuleEngine.ContributionEntry].self, from: data) else {
+            return 0
+        }
+        return entries.map(\.percent).max() ?? 0
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(windowLabel).font(.headline)
                 Spacer()
-                if violations.count > 0 {
-                    Text("\(violations.count)")
-                        .font(.caption2.bold())
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.red)
-                        .clipShape(Capsule())
-                }
                 Text(timeRange).font(.caption).foregroundColor(.secondary)
             }
 
@@ -45,13 +76,74 @@ struct MealSlotCard: View {
                         Text("Б: \(Int(event.proteins))г Ж: \(Int(event.fats))г У: \(Int(event.carbs))г")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        ForEach(event.estimateItems.prefix(3), id: \.persistentModelID) { item in
-                            HStack {
-                                Text(item.name).font(.caption)
-                                Spacer()
-                                Text("\(Int(item.estimatedCalories)) ккал").font(.caption2)
+
+                        ForEach(event.estimateItems.prefix(5), id: \.persistentModelID) { item in
+                            let itemId = item.persistentModelID.storeIdentifier ?? ""
+                            let itemViolations = productViolationMap[itemId]
+
+                            if let itemViols = itemViolations, !itemViols.isEmpty {
+                                let worstZone = itemViols.map(\.zone).contains("violation") ? "violation" : "warning"
+                                let zoneColor = worstZone == "violation" ? Color.red : Color.yellow
+
+                                DisclosureGroup {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        ForEach(itemViols, id: \.ruleId) { pv in
+                                            HStack(spacing: 4) {
+                                                Circle()
+                                                    .fill(pv.zone == "violation" ? Color.red : Color.yellow)
+                                                    .frame(width: 5, height: 5)
+                                                Text("\(pv.ruleTitle) — \(Int(pv.percent))% дневного")
+                                                    .font(.caption2)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                        }
+                                    }
+                                    .padding(.leading, 12)
+                                    .padding(.top, 2)
+                                } label: {
+                                    HStack {
+                                        Circle()
+                                            .fill(zoneColor)
+                                            .frame(width: 6, height: 6)
+                                        Text(item.name).font(.caption)
+                                        Spacer()
+                                        Text("\(Int(item.estimatedCalories)) ккал").font(.caption2)
+                                    }
+                                    .foregroundColor(.secondary)
+                                }
+                            } else {
+                                HStack {
+                                    Text(item.name).font(.caption)
+                                    Spacer()
+                                    Text("\(Int(item.estimatedCalories)) ккал").font(.caption2)
+                                }
+                                .foregroundColor(.secondary)
                             }
-                            .foregroundColor(item.highCalorieFlag ? .red : .secondary)
+                        }
+
+                        if !violations.isEmpty {
+                            Divider()
+                            ForEach(violations.prefix(3)) { violation in
+                                let desc = engine.violationDescription(for: violation)
+                                HStack(alignment: .top, spacing: 4) {
+                                    Circle()
+                                        .fill(violation.zone == "violation" ? Color.red : Color.yellow)
+                                        .frame(width: 6, height: 6)
+                                        .padding(.top, 5)
+                                    Text(desc)
+                                        .font(.caption)
+                                        .foregroundColor(violation.zone == "violation" ? .red : .yellow)
+                                }
+                            }
+                        } else if event.status == .structured {
+                            HStack(spacing: 4) {
+                                Circle()
+                                    .fill(Color.green)
+                                    .frame(width: 6, height: 6)
+                                Text("Все правила соблюдены")
+                                    .font(.caption)
+                                    .foregroundColor(.green)
+                            }
                         }
                     }
                 case .empty:
@@ -64,10 +156,6 @@ struct MealSlotCard: View {
         }
         .padding()
         .background(backgroundColor)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(borderColor, lineWidth: violations.isEmpty ? 0 : 3)
-        )
         .cornerRadius(12)
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
@@ -82,10 +170,5 @@ struct MealSlotCard: View {
         case .parseFailed: return Color.orange.opacity(0.2)
         case .skipped: return Color.gray.opacity(0.15)
         }
-    }
-
-    private var borderColor: Color {
-        let hasViolation = violations.contains { $0.zone == "violation" }
-        return hasViolation ? .red : .yellow
     }
 }

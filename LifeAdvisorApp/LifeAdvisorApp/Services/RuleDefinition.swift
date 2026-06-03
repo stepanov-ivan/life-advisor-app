@@ -10,7 +10,6 @@ struct RuleDefinition: Codable, Identifiable {
     let title: String
     let description: String
     let window: String
-    let minDaysData: Int
 
     var categoryTitle: String {
         switch category {

@@ -10,7 +10,6 @@ final class EstimateItem {
     var estimatedCarbs: Double
     var impactScore: Double
     var reason: String
-    var highCalorieFlag: Bool
     var sourceModeRaw: String
     var grams: Double
     var baseGrams: Double
@@ -40,7 +39,6 @@ final class EstimateItem {
         estimatedCarbs: Double,
         impactScore: Double,
         reason: String,
-        highCalorieFlag: Bool,
         sourceMode: EstimateSourceMode,
         grams: Double = 100,
         estimatedSaturatedFats: Double = 0,
@@ -56,7 +54,6 @@ final class EstimateItem {
         self.estimatedCarbs = estimatedCarbs
         self.impactScore = min(1, max(0, impactScore))
         self.reason = String(reason.prefix(140))
-        self.highCalorieFlag = highCalorieFlag
         self.sourceModeRaw = sourceMode.rawValue
         self.grams = max(0, grams)
         self.baseGrams = max(0.1, grams)

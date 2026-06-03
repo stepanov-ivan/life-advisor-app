@@ -143,7 +143,48 @@ final class RuleEngine {
     // MARK: - Evaluation
 
     func evaluateToday(rule: RuleDefinition) -> EvaluationResult {
-        evaluateRule(rule, for: Date())
+        if rule.window == "week" {
+            let recentDay = bestWeekEvaluationDate()
+            return evaluateRule(rule, for: recentDay)
+        }
+        let recentDay = bestEvaluationDate()
+        return evaluateRule(rule, for: recentDay)
+    }
+
+    func bestEvaluationDate() -> Date {
+        mostRecentDayWithData() ?? Date()
+    }
+
+    private func mostRecentDayWithData() -> Date? {
+        guard let context = modelContext else { return nil }
+        let cal = Calendar.current
+        for daysBack in 0..<14 {
+            guard let date = cal.date(byAdding: .day, value: -daysBack, to: Date()) else { continue }
+            let range = DashboardDateLogic.dayRange(for: date)
+            let start = range.start
+            let end = range.end
+            let descriptor = FetchDescriptor<MealEvent>(
+                predicate: #Predicate { $0.timestamp >= start && $0.timestamp < end }
+            )
+            if let events = try? context.fetch(descriptor),
+               events.contains(where: { $0.status != .skipped && $0.status != .parseFailed && $0.status != .empty }) {
+                return date
+            }
+        }
+        return nil
+    }
+
+    func bestWeekEvaluationDate() -> Date {
+        guard let context = modelContext else { return Date() }
+        let cal = Calendar.current
+        for daysBack in 0..<14 {
+            guard let date = cal.date(byAdding: .day, value: -daysBack, to: Date()) else { continue }
+            let weekDays = weekDayRange(for: date)
+            if daysWithStructuredMeals(from: weekDays, context: context) >= 1 {
+                return date
+            }
+        }
+        return bestEvaluationDate()
     }
 
     func evaluateRule(_ rule: RuleDefinition, for date: Date) -> EvaluationResult {
@@ -168,18 +209,26 @@ final class RuleEngine {
             ? weekDayRange(for: date)
             : [date]
 
+        // For day rules, just check if this day has data
+        if rule.window == "day" {
+            let daysWithData = daysWithStructuredMeals(from: [date], context: context)
+            if daysWithData == 0 {
+                return .noData
+            }
+        } else {
+            // For week rules, check at least one day has data
+            let daysWithData = daysWithStructuredMeals(from: windowDays, context: context)
+            if daysWithData == 0 {
+                return .noData
+            }
+        }
+
         let items = fetchItems(for: windowDays, context: context)
 
         // Filter out skipped and parseFailed
         let validItems = items.filter { item in
             guard let meal = item.mealEvent else { return false }
             return meal.status != .skipped && meal.status != .parseFailed
-        }
-
-        // Check min days data
-        let daysWithData = daysWithStructuredMeals(from: windowDays, context: context)
-        if daysWithData < rule.minDaysData {
-            return .noData
         }
 
         let value = computeField(field, items: validItems, context: context, days: windowDays)
@@ -195,7 +244,7 @@ final class RuleEngine {
         }
 
         let daysWithData = daysWithStructuredMeals(from: [date], context: context)
-        if daysWithData < rule.minDaysData {
+        if daysWithData == 0 {
             return .noData
         }
 
@@ -214,7 +263,7 @@ final class RuleEngine {
         let windowDays = weekDayRange(for: date)
 
         let daysWithData = daysWithStructuredMeals(from: windowDays, context: context)
-        if daysWithData < rule.minDaysData {
+        if daysWithData == 0 {
             return .noData
         }
 
@@ -356,8 +405,33 @@ final class RuleEngine {
 
     func violationsForMeal(_ meal: MealEvent) -> [RuleViolation] {
         guard let context = modelContext else { return [] }
-        let allViolations = (try? context.fetch(FetchDescriptor<RuleViolation>())) ?? []
-        return allViolations.filter { $0.mealEvent?.id == meal.id }
+        let cal = Calendar.current
+        let dayStart = cal.startOfDay(for: meal.timestamp)
+        guard let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) else { return [] }
+
+        let descriptor = FetchDescriptor<RuleViolation>(
+            predicate: #Predicate { $0.date >= dayStart && $0.date < dayEnd }
+        )
+        let dayViolations = (try? context.fetch(descriptor)) ?? []
+
+        let mealItemIds = Set(meal.estimateItems.map { $0.persistentModelID.storeIdentifier ?? "" })
+
+        return dayViolations.filter { violation in
+            // Check contributionJSON for matching itemIds
+            if let json = violation.contributionJSON,
+               let data = json.data(using: .utf8),
+               let entries = try? JSONDecoder().decode([ContributionEntry].self, from: data) {
+                let contributionItemIds = Set(entries.map { $0.itemId })
+                if !contributionItemIds.isDisjoint(with: mealItemIds) {
+                    return true
+                }
+            }
+            // Fallback: direct mealEvent match
+            if violation.mealEvent?.persistentModelID == meal.persistentModelID {
+                return true
+            }
+            return false
+        }
     }
 
     func violationsForDay(_ date: Date) -> [RuleViolation] {
@@ -389,6 +463,10 @@ final class RuleEngine {
         for rule in enabledRules() {
             let result = evaluateRule(rule, for: date)
             if result.zone == .warning || result.zone == .violation {
+                // Compute contribution map
+                let contributions = contributionMap(for: rule, date: date)
+                let contribJSON = encodeContributionJSON(contributions)
+
                 // Find the culprit meal/event/item
                 let events = eventsForDay(date, context: context)
                 let culpritEvent = findCulpritEvent(rule: rule, events: events, context: context)
@@ -399,6 +477,7 @@ final class RuleEngine {
                     zone: result.zone.rawValue,
                     magnitude: result.magnitude,
                     reasonCode: result.reasonCode,
+                    contributionJSON: contribJSON,
                     mealEvent: culpritEvent.meal,
                     estimateItem: culpritEvent.item
                 )
@@ -455,6 +534,182 @@ final class RuleEngine {
             sortBy: [SortDescriptor(\RuleViolation.date, order: .reverse)]
         )
         return (try? context.fetch(descriptor)) ?? []
+    }
+
+    // MARK: - Contribution analysis
+
+    struct ContributionEntry: Codable {
+        let itemId: String
+        let name: String
+        let percent: Double
+    }
+
+    func contributionMap(for rule: RuleDefinition, date: Date) -> [ContributionEntry] {
+        guard let context = modelContext else { return [] }
+
+        switch rule.type {
+        case "range":
+            return contributionForRangeRule(rule, date: date, context: context)
+        case "presence":
+            return contributionForPresenceRule(rule, date: date, context: context)
+        default:
+            return []
+        }
+    }
+
+    private func contributionForRangeRule(_ rule: RuleDefinition, date: Date, context: ModelContext) -> [ContributionEntry] {
+        guard let field = rule.field else { return [] }
+        let windowDays = rule.window == "week" ? weekDayRange(for: date) : [date]
+        let items = fetchItems(for: windowDays, context: context)
+            .filter { item in
+                guard let meal = item.mealEvent else { return false }
+                return meal.status != .skipped && meal.status != .parseFailed
+            }
+
+        guard !items.isEmpty else { return [] }
+
+        let entries: [ContributionEntry]
+        switch field {
+        case "fatPercent", "saturatedFatPercent", "transFatPercent":
+            let totalNutrient = items.reduce(0) { $0 + $1.estimatedFats }
+            guard totalNutrient > 0 else { return [] }
+            entries = items.map { item in
+                ContributionEntry(
+                    itemId: item.persistentModelID.storeIdentifier ?? "",
+                    name: item.name,
+                    percent: (item.estimatedFats / totalNutrient) * 100
+                )
+            }
+        case "proteinPercent":
+            let totalNutrient = items.reduce(0) { $0 + $1.estimatedProteins }
+            guard totalNutrient > 0 else { return [] }
+            entries = items.map { item in
+                ContributionEntry(
+                    itemId: item.persistentModelID.storeIdentifier ?? "",
+                    name: item.name,
+                    percent: (item.estimatedProteins / totalNutrient) * 100
+                )
+            }
+        case "carbsPercent":
+            let totalNutrient = items.reduce(0) { $0 + $1.estimatedCarbs }
+            guard totalNutrient > 0 else { return [] }
+            entries = items.map { item in
+                ContributionEntry(
+                    itemId: item.persistentModelID.storeIdentifier ?? "",
+                    name: item.name,
+                    percent: (item.estimatedCarbs / totalNutrient) * 100
+                )
+            }
+        case "sugarPercent":
+            let totalNutrient = items.reduce(0) { $0 + $1.estimatedSugar }
+            guard totalNutrient > 0 else { return [] }
+            entries = items.map { item in
+                ContributionEntry(
+                    itemId: item.persistentModelID.storeIdentifier ?? "",
+                    name: item.name,
+                    percent: (item.estimatedSugar / totalNutrient) * 100
+                )
+            }
+        case "sodiumMg":
+            let totalValue = items.reduce(0) { $0 + $1.estimatedSodium }
+            guard totalValue > 0 else { return [] }
+            entries = items.map { item in
+                ContributionEntry(
+                    itemId: item.persistentModelID.storeIdentifier ?? "",
+                    name: item.name,
+                    percent: (item.estimatedSodium / totalValue) * 100
+                )
+            }
+        case "fiberGrams":
+            let totalValue = items.reduce(0) { $0 + $1.estimatedFiber }
+            guard totalValue > 0 else { return [] }
+            entries = items.map { item in
+                ContributionEntry(
+                    itemId: item.persistentModelID.storeIdentifier ?? "",
+                    name: item.name,
+                    percent: (item.estimatedFiber / totalValue) * 100
+                )
+            }
+        case "fruitVegGrams":
+            let totalValue = items
+                .filter { $0.foodCategory == "fruit" || $0.foodCategory == "vegetable" }
+                .reduce(0) { $0 + $1.grams }
+            guard totalValue > 0 else { return [] }
+            entries = items
+                .filter { $0.foodCategory == "fruit" || $0.foodCategory == "vegetable" }
+                .map { item in
+                    ContributionEntry(
+                        itemId: item.persistentModelID.storeIdentifier ?? "",
+                        name: item.name,
+                        percent: (item.grams / totalValue) * 100
+                    )
+                }
+        case "redMeatGrams":
+            let totalValue = items
+                .filter { $0.foodCategory == "red_meat" }
+                .reduce(0) { $0 + $1.grams }
+            guard totalValue > 0 else { return [] }
+            entries = items
+                .filter { $0.foodCategory == "red_meat" }
+                .map { item in
+                    ContributionEntry(
+                        itemId: item.persistentModelID.storeIdentifier ?? "",
+                        name: item.name,
+                        percent: (item.grams / totalValue) * 100
+                    )
+                }
+        case "energyBalancePercent":
+            let totalCalories = items.reduce(0) { $0 + $1.estimatedCalories }
+            guard totalCalories > 0 else { return [] }
+            entries = items.map { item in
+                ContributionEntry(
+                    itemId: item.persistentModelID.storeIdentifier ?? "",
+                    name: item.name,
+                    percent: (item.estimatedCalories / totalCalories) * 100
+                )
+            }
+        default:
+            return []
+        }
+
+        return entries
+            .filter { $0.percent > 30 }
+            .sorted { $0.percent > $1.percent }
+            .prefix(3)
+            .map { $0 }
+    }
+
+    private func contributionForPresenceRule(_ rule: RuleDefinition, date: Date, context: ModelContext) -> [ContributionEntry] {
+        guard let category = rule.params.category else { return [] }
+        let items = fetchItems(for: [date], context: context)
+            .filter { item in
+                guard let meal = item.mealEvent else { return false }
+                return meal.status != .skipped && meal.status != .parseFailed
+            }
+
+        let targetCategories = category == "legume_or_nut" ? ["legume", "nut_seed"] : [category]
+        let inverse = rule.params.inverse ?? false
+
+        return items.compactMap { item in
+            let match = targetCategories.contains(item.foodCategory ?? "")
+            let isRelevant = inverse ? !match : match
+            guard isRelevant else { return nil }
+            return ContributionEntry(
+                itemId: item.persistentModelID.storeIdentifier ?? "",
+                name: item.name,
+                percent: 100
+            )
+        }
+        .sorted { $0.percent > $1.percent }
+        .prefix(3)
+        .map { $0 }
+    }
+
+    private func encodeContributionJSON(_ entries: [ContributionEntry]) -> String? {
+        guard !entries.isEmpty else { return nil }
+        guard let data = try? JSONEncoder().encode(entries),
+              let json = String(data: data, encoding: .utf8) else { return nil }
+        return json
     }
 
     // MARK: - Culprit tracing
@@ -528,22 +783,205 @@ final class RuleEngine {
         return (try? context.fetch(descriptor)) ?? []
     }
 
+    // MARK: - Metric formatting
+
+    struct RuleMetricDisplay {
+        let valueFormatted: String
+        let thresholdFormatted: String
+        let unit: String
+        let zone: RuleZone
+    }
+
+    func formattedMetric(for rule: RuleDefinition, date: Date) -> RuleMetricDisplay {
+        let result = evaluateRule(rule, for: date)
+        let format = metricFormat(for: rule.field)
+
+        switch rule.type {
+        case "range":
+            let rawValue = computeMetricValue(field: rule.field, rule: rule, date: date)
+            let displayValue = rawValue * format.multiply
+            let decimals = format.decimals
+            let valueStr = String(format: "%.\(decimals)f", displayValue)
+
+            let thresholdStr: String
+            switch (rule.params.lower, rule.params.upper) {
+            case let (lo?, up?):
+                let loStr = String(format: "%.\(decimals)f", lo * format.multiply)
+                let upStr = String(format: "%.\(decimals)f", up * format.multiply)
+                thresholdStr = "\(loStr)–\(upStr)\(format.unit)"
+            case let (lo?, nil):
+                let loStr = String(format: "%.\(decimals)f", lo * format.multiply)
+                thresholdStr = "≥\(loStr)\(format.unit)"
+            case let (nil, up?):
+                let upStr = String(format: "%.\(decimals)f", up * format.multiply)
+                thresholdStr = "≤\(upStr)\(format.unit)"
+            case (nil, nil):
+                thresholdStr = ""
+            }
+
+            return RuleMetricDisplay(
+                valueFormatted: valueStr + format.unit,
+                thresholdFormatted: thresholdStr,
+                unit: format.unit,
+                zone: result.zone
+            )
+
+        case "presence":
+            let label: String
+            switch result.zone {
+            case .normal: label = "В норме"
+            case .warning: label = "Внимание"
+            case .violation: label = "Нарушено"
+            case .noData: label = "Нет данных"
+            }
+            return RuleMetricDisplay(
+                valueFormatted: label,
+                thresholdFormatted: "",
+                unit: "",
+                zone: result.zone
+            )
+
+        case "countSkipped":
+            let skippedCount = computeSkippedCount(for: date)
+            let violationThreshold = Int(rule.params.violationThreshold ?? 4)
+            return RuleMetricDisplay(
+                valueFormatted: "\(skippedCount) пропусков",
+                thresholdFormatted: "≤\(violationThreshold)",
+                unit: "",
+                zone: result.zone
+            )
+
+        default:
+            return RuleMetricDisplay(
+                valueFormatted: "—",
+                thresholdFormatted: "",
+                unit: "",
+                zone: .noData
+            )
+        }
+    }
+
+    private struct MetricFormat {
+        let unit: String
+        let multiply: Double
+        let decimals: Int
+    }
+
+    private func metricFormat(for field: String?) -> MetricFormat {
+        guard let field else {
+            return MetricFormat(unit: "", multiply: 1, decimals: 0)
+        }
+        switch field {
+        case "fatPercent", "proteinPercent", "carbsPercent",
+             "saturatedFatPercent", "transFatPercent", "sugarPercent",
+             "energyBalancePercent", "pufaPercent":
+            return MetricFormat(unit: "%", multiply: 100, decimals: 1)
+        case "sodiumMg":
+            return MetricFormat(unit: " мг", multiply: 1, decimals: 0)
+        case "fiberGrams", "fruitVegGrams", "redMeatGrams":
+            return MetricFormat(unit: " г", multiply: 1, decimals: 0)
+        default:
+            return MetricFormat(unit: "", multiply: 1, decimals: 0)
+        }
+    }
+
+    private func computeMetricValue(field: String?, rule: RuleDefinition, date: Date) -> Double {
+        guard let field, let context = modelContext else { return 0 }
+        let windowDays = rule.window == "week" ? weekDayRange(for: date) : [date]
+        let items = fetchItems(for: windowDays, context: context)
+            .filter { item in
+                guard let meal = item.mealEvent else { return false }
+                return meal.status != .skipped && meal.status != .parseFailed
+            }
+        return computeField(field, items: items, context: context, days: windowDays)
+    }
+
+    private func computeSkippedCount(for date: Date) -> Int {
+        guard let context = modelContext else { return 0 }
+        let windowDays = weekDayRange(for: date)
+        var skippedCount = 0
+        for day in windowDays {
+            let range = DashboardDateLogic.dayRange(for: day)
+            let start = range.start
+            let end = range.end
+            let descriptor = FetchDescriptor<MealEvent>(
+                predicate: #Predicate { $0.timestamp >= start && $0.timestamp < end }
+            )
+            let events = (try? context.fetch(descriptor)) ?? []
+            if events.contains(where: { $0.status == .skipped }) {
+                skippedCount += 1
+            }
+        }
+        return skippedCount
+    }
+
+    // MARK: - Violation descriptions
+
+    func violationDescription(for violation: RuleViolation) -> String {
+        guard let rule = rules.first(where: { $0.id == violation.ruleId }) else {
+            return violation.reasonCode
+        }
+
+        switch violation.reasonCode {
+        case "exceeds_upper":
+            let metric = formattedMetric(for: rule, date: violation.date)
+            return "Превышение: \(metric.valueFormatted) при норме \(metric.thresholdFormatted)"
+
+        case "below_lower":
+            let metric = formattedMetric(for: rule, date: violation.date)
+            return "Недостаточно: \(metric.valueFormatted) при норме \(metric.thresholdFormatted)"
+
+        case "approaching_upper":
+            let metric = formattedMetric(for: rule, date: violation.date)
+            return "Близко к пределу: \(metric.valueFormatted) при норме \(metric.thresholdFormatted)"
+
+        case "approaching_lower":
+            let metric = formattedMetric(for: rule, date: violation.date)
+            return "Близко к минимуму: \(metric.valueFormatted) при норме \(metric.thresholdFormatted)"
+
+        case "category_missing":
+            let categoryTitle = russianCategoryName(rule.params.category)
+            return "Не хватает продуктов категории «\(categoryTitle)»"
+
+        case "unwanted_category_present":
+            let categoryTitle = russianCategoryName(rule.params.category)
+            return "Присутствуют нежелательные продукты: \(categoryTitle)"
+
+        case "excessive_skips":
+            return "Много пропусков: \(Int(violation.magnitude)) за неделю"
+
+        case "some_skips":
+            return "Есть пропуски приёмов: \(Int(violation.magnitude)) за неделю"
+
+        default:
+            return violation.reasonCode
+        }
+    }
+
+    private func russianCategoryName(_ category: String?) -> String {
+        switch category {
+        case "whole_grain": return "цельные злаки"
+        case "legume_or_nut": return "бобовые/орехи/семена"
+        case "processed_meat": return "обработанное мясо"
+        case "legume": return "бобовые"
+        case "nut_seed": return "орехи/семена"
+        case "fruit": return "фрукты"
+        case "vegetable": return "овощи"
+        case "red_meat": return "красное мясо"
+        default: return category ?? "неизвестно"
+        }
+    }
+
     // MARK: - Summary
 
     func summary(date: Date) -> (normal: Int, total: Int) {
         let enabled = enabledRules()
         var normalCount = 0
         for rule in enabled {
-            let result = evaluateRule(rule, for: date)
+            let result = evaluateToday(rule: rule)
             if result.zone == .normal { normalCount += 1 }
         }
         return (normalCount, enabled.count)
     }
 
-    func hasMinData() -> Bool {
-        let today = Date()
-        guard let context = modelContext else { return false }
-        let windowDays = weekDayRange(for: today)
-        return daysWithStructuredMeals(from: windowDays, context: context) >= 3
-    }
 }

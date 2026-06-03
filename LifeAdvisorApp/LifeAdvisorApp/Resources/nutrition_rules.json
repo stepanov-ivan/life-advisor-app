@@ -9,8 +9,7 @@
       "category": "macronutrient_balance",
       "title": "Белок в норме",
       "description": "ВОЗ: 10–15% суточной энергии",
-      "window": "day",
-      "minDaysData": 3
+      "window": "day"
     },
     {
       "id": "who_total_fat",
@@ -21,8 +20,7 @@
       "category": "macronutrient_balance",
       "title": "Жиры в норме",
       "description": "ВОЗ: 15–30% суточной энергии",
-      "window": "day",
-      "minDaysData": 3
+      "window": "day"
     },
     {
       "id": "who_saturated_fat",
@@ -33,8 +31,7 @@
       "category": "macronutrient_balance",
       "title": "Насыщенные жиры",
       "description": "ВОЗ: ≤10% суточной энергии",
-      "window": "day",
-      "minDaysData": 3
+      "window": "day"
     },
     {
       "id": "who_trans_fat",
@@ -45,8 +42,7 @@
       "category": "macronutrient_balance",
       "title": "Трансжиры",
       "description": "ВОЗ: ≤1% суточной энергии",
-      "window": "day",
-      "minDaysData": 3
+      "window": "day"
     },
     {
       "id": "who_pufa",
@@ -57,8 +53,7 @@
       "category": "macronutrient_balance",
       "title": "ПНЖК в норме",
       "description": "ВОЗ: 6–10% суточной энергии",
-      "window": "day",
-      "minDaysData": 3
+      "window": "day"
     },
     {
       "id": "who_carbs",
@@ -69,8 +64,7 @@
       "category": "macronutrient_balance",
       "title": "Углеводы в норме",
       "description": "ВОЗ: 45–75% суточной энергии",
-      "window": "day",
-      "minDaysData": 3
+      "window": "day"
     },
     {
       "id": "who_free_sugar",
@@ -81,8 +75,7 @@
       "category": "restrictions",
       "title": "Свободный сахар",
       "description": "ВОЗ: ≤10% суточной энергии",
-      "window": "day",
-      "minDaysData": 3
+      "window": "day"
     },
     {
       "id": "who_sodium",
@@ -93,8 +86,7 @@
       "category": "restrictions",
       "title": "Соль (натрий)",
       "description": "ВОЗ: ≤2000 мг натрия в день",
-      "window": "day",
-      "minDaysData": 3
+      "window": "day"
     },
     {
       "id": "who_energy_balance",
@@ -105,8 +97,7 @@
       "category": "restrictions",
       "title": "Энергобаланс",
       "description": "Превышение целевой калорийности",
-      "window": "week",
-      "minDaysData": 3
+      "window": "week"
     },
     {
       "id": "who_fiber",
@@ -117,8 +108,7 @@
       "category": "restrictions",
       "title": "Клетчатка",
       "description": "ВОЗ: ≥25 г клетчатки в день",
-      "window": "day",
-      "minDaysData": 3
+      "window": "day"
     },
     {
       "id": "who_fruits_vegetables",
@@ -129,8 +119,7 @@
       "category": "food_quality",
       "title": "Овощи и фрукты",
       "description": "ВОЗ: ≥400 г овощей и фруктов в день",
-      "window": "day",
-      "minDaysData": 3
+      "window": "day"
     },
     {
       "id": "who_whole_grain",
@@ -141,8 +130,7 @@
       "category": "food_quality",
       "title": "Цельные злаки",
       "description": "Включайте цельные злаки ежедневно",
-      "window": "day",
-      "minDaysData": 3
+      "window": "day"
     },
     {
       "id": "who_legumes_nuts",
@@ -153,8 +141,7 @@
       "category": "food_quality",
       "title": "Бобовые/орехи/семена",
       "description": "Включайте бобовые, орехи или семена ежедневно",
-      "window": "day",
-      "minDaysData": 3
+      "window": "day"
     },
     {
       "id": "who_red_meat",
@@ -165,8 +152,7 @@
       "category": "food_quality",
       "title": "Красное мясо",
       "description": "ВОЗ: ≤500 г красного мяса в неделю",
-      "window": "week",
-      "minDaysData": 3
+      "window": "week"
     },
     {
       "id": "who_processed_meat",
@@ -177,8 +163,7 @@
       "category": "food_quality",
       "title": "Обработанное мясо",
       "description": "Избегайте обработанного мяса",
-      "window": "day",
-      "minDaysData": 3
+      "window": "day"
     },
     {
       "id": "who_meal_regularity",
@@ -189,8 +174,7 @@
       "category": "eating_pattern",
       "title": "Регулярность приёмов",
       "description": "Не пропускайте приёмы пищи",
-      "window": "week",
-      "minDaysData": 3
+      "window": "week"
     }
   ]
 }

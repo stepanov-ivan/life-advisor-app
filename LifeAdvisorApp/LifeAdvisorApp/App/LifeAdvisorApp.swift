@@ -20,7 +20,6 @@ struct LifeAdvisorApp: App {
             MemoryHypothesis.self,
             MemoryDataGap.self,
             MealWindow.self,
-            DailyAdvice.self,
             Recommendation.self,
             NutritionRuleConfig.self,
             RuleViolation.self

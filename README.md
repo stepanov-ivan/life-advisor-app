@@ -4,6 +4,20 @@ Life Advisor is an open-source iOS app for building healthier eating habits with
 
 It combines deterministic nutrition rules with LLM-assisted meal parsing so users can log meals in natural language, review structured estimates, and understand how their eating pattern aligns with evidence-based recommendations.
 
+## Screenshots and demo
+
+Screenshots and a short demo are planned for the first public release.
+
+Recommended showcase assets for grant and repository review:
+
+- onboarding flow with LLM setup
+- dashboard with meal slots and nutrition feedback
+- analytics view with calorie and macro trends
+- rules view with explainable WHO-aligned checks
+- short demo video of meal logging to rule feedback
+
+The current UI is primarily Russian-first. English localization is planned so the project can be reviewed more easily by non-Russian-speaking contributors and grant reviewers.
+
 ## Why this project matters
 
 - Nutrition apps often optimize for calorie counting, not dietary quality.
@@ -70,6 +84,16 @@ The core design principle is simple:
 3. The rule engine evaluates the structured data against explicit nutrition rules.
 4. The UI shows both outcomes and rationale.
 
+## Reusable open-source building blocks
+
+This repository is not only an end-user app. It also explores reusable patterns that may be valuable to other open-source teams building health, nutrition, and explainable AI products:
+
+- deterministic rule evaluation layered on top of LLM-derived structured input
+- validation and contract testing for model output before product logic consumes it
+- local-first storage for sensitive user nutrition data
+- explainable violation tracing instead of opaque wellness scoring
+- maintainable hybrid architecture where probabilistic parsing feeds explicit rules
+
 ## Getting started
 
 ### Requirements
@@ -110,6 +134,16 @@ This repository is actively evolving. The current focus is:
 - making meal memory and repeated-entry flows more reliable
 - growing the testing and release discipline around the core engine
 
+See `ROADMAP.md` for planned milestones and `CHANGELOG.md` for public project history.
+
+## Release status
+
+The project is currently pre-release.
+
+The intended first public milestone is:
+
+- `v0.1.0`: stable open-source showcase release with documented setup, passing tests, cleaner public repository surface, and English-localization groundwork
+
 ## Open source priorities
 
 Areas where outside contributions are especially helpful:
@@ -139,6 +173,9 @@ This project is a strong fit for Codex for OSS because Codex can help with recur
 - Security policy: see `SECURITY.md`
 - Contribution guide: see `CONTRIBUTING.md`
 - Code of conduct: see `CODE_OF_CONDUCT.md`
+- Roadmap: see `ROADMAP.md`
+- Changelog: see `CHANGELOG.md`
+- Release prep: see `docs/release-checklist.md`
 
 ## License
 

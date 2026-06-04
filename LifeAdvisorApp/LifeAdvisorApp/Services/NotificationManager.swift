@@ -26,16 +26,17 @@ final class NotificationManager: NSObject, ObservableObject {
 
     func scheduleMealWindowNotifications(windows: [MealWindow]) {
         let center = UNUserNotificationCenter.current()
+        let language = AppLanguageManager.shared.effectiveLanguage
 
         center.removeAllPendingNotificationRequests()
 
         for window in windows {
             let content = UNMutableNotificationContent()
-            content.title = "\(window.name)"
-            content.body = "Запиши, что ты съел"
+            content.title = window.localizedName(language: language)
+            content.body = LocalizationHelper.localized("Запиши, что ты съел", table: "Localizable", language: language)
             content.sound = .default
             content.categoryIdentifier = "MEAL_WINDOW"
-            content.userInfo = ["windowLabel": window.name]
+            content.userInfo = ["windowId": window.windowId]
 
             var dateComponents = DateComponents()
             dateComponents.hour = window.endHour
@@ -47,7 +48,7 @@ final class NotificationManager: NSObject, ObservableObject {
             )
 
             let request = UNNotificationRequest(
-                identifier: "meal-\(window.name)",
+                identifier: "meal-\(window.windowId)",
                 content: content,
                 trigger: trigger
             )
@@ -57,9 +58,10 @@ final class NotificationManager: NSObject, ObservableObject {
     }
 
     func scheduleEndOfDayReminder() {
+        let language = AppLanguageManager.shared.effectiveLanguage
         let content = UNMutableNotificationContent()
-        content.title = "Не все приёмы записаны"
-        content.body = "Заполни оставшиеся, чтобы получить совет дня"
+        content.title = LocalizationHelper.localized("Не все приёмы записаны", table: "Localizable", language: language)
+        content.body = LocalizationHelper.localized("Заполни оставшиеся, чтобы получить совет дня", table: "Localizable", language: language)
         content.sound = .default
 
         var dateComponents = DateComponents()
@@ -81,9 +83,10 @@ final class NotificationManager: NSObject, ObservableObject {
     }
 
     func scheduleAdviceReminder() {
+        let language = AppLanguageManager.shared.effectiveLanguage
         let content = UNMutableNotificationContent()
-        content.title = "Твой совет дня готов"
-        content.body = "Открой приложение, чтобы узнать анализ питания"
+        content.title = LocalizationHelper.localized("Твой совет дня готов", table: "Localizable", language: language)
+        content.body = LocalizationHelper.localized("Открой приложение, чтобы узнать анализ питания", table: "Localizable", language: language)
         content.sound = .default
 
         let trigger = UNTimeIntervalNotificationTrigger(
@@ -101,21 +104,22 @@ final class NotificationManager: NSObject, ObservableObject {
     }
 
     func registerCategories() {
+        let language = AppLanguageManager.shared.effectiveLanguage
         let logAction = UNNotificationAction(
             identifier: "LOG_MEAL",
-            title: "Записать",
+            title: LocalizationHelper.localized("Записать", table: "Localizable", language: language),
             options: .foreground
         )
 
         let skipAction = UNNotificationAction(
             identifier: "SKIP_MEAL",
-            title: "Не ел",
+            title: LocalizationHelper.localized("Не ел", table: "Localizable", language: language),
             options: []
         )
 
         let remindLaterAction = UNNotificationAction(
             identifier: "REMIND_LATER",
-            title: "Напомнить позже",
+            title: LocalizationHelper.localized("Напомнить позже", table: "Localizable", language: language),
             options: []
         )
 
@@ -144,12 +148,12 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
     ) async {
         switch response.actionIdentifier {
         case "LOG_MEAL":
-            if let windowLabel = response.notification.request.content.userInfo["windowLabel"] as? String {
-                pendingLogWindow = windowLabel
+            if let windowId = response.notification.request.content.userInfo["windowId"] as? String {
+                pendingLogWindow = windowId
             }
         case "SKIP_MEAL":
-            if let windowLabel = response.notification.request.content.userInfo["windowLabel"] as? String {
-                pendingSkipWindow = windowLabel
+            if let windowId = response.notification.request.content.userInfo["windowId"] as? String {
+                pendingSkipWindow = windowId
             }
         case "REMIND_LATER":
             let content = response.notification.request.content

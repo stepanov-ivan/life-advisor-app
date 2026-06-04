@@ -1,8 +1,4 @@
-## Purpose
-
-Человекочитаемые описания причин нарушений на русском языке, заменяющие технические английские коды в UI.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Генерация локализованных описаний нарушений
 Система SHALL предоставлять локализованное пользовательское описание нарушения на основе `RuleViolation.reasonCode`, stable rule ids и presentation model. Описание SHALL поддерживать как минимум `ru` и `en` и SHALL использовать active app language вместо жёстко зашитого русского текста.

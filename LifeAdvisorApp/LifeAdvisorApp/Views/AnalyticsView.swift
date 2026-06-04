@@ -6,11 +6,20 @@ struct AnalyticsView: View {
     @Environment(\.modelContext) private var modelContext
     @AppStorage("goal_calories") private var goalCalories = 2000.0
     @State private var selectedPeriod: AnalyticsPeriod = .day
+    @StateObject private var languageManager = AppLanguageManager.shared
 
-    enum AnalyticsPeriod: String, CaseIterable {
-        case day = "День"
-        case week = "Неделя"
-        case month = "Месяц"
+    enum AnalyticsPeriod: CaseIterable {
+        case day
+        case week
+        case month
+
+        var title: LocalizedStringKey {
+            switch self {
+            case .day: return "День"
+            case .week: return "Неделя"
+            case .month: return "Месяц"
+            }
+        }
     }
 
     private var periodInterval: (start: Date, end: Date) {
@@ -100,7 +109,7 @@ struct AnalyticsView: View {
             VStack(spacing: 0) {
                 Picker("Период", selection: $selectedPeriod) {
                     ForEach(AnalyticsPeriod.allCases, id: \.self) { period in
-                        Text(period.rawValue).tag(period)
+                        Text(period.title).tag(period)
                     }
                 }
                 .pickerStyle(.segmented)

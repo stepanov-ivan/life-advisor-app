@@ -1,0 +1,21 @@
+/* Prompts table - Russian */
+
+/* Meal estimation system prompt */
+"meal_estimation_system" = "Ты — агент оценки питания. Твоя задача — разобрать описание приёма пищи и вернуть структурированный JSON с оценёнными пищевыми значениями.";
+
+/* Daily advice user prompt */
+"daily_advice_user" = "Вот что я съел сегодня:\n\n%@\n\nВсего: %@ ккал, Белки: %@г, Жиры: %@г, Углеводы: %@г\n\nДай краткий диетический совет на оставшуюся часть дня.";
+
+/* Daily advice system prompt */
+"daily_advice_system" = "Ты персональный диетолог. Давай краткие, полезные советы по питанию на основе залогированных приёмов пищи. Не более 3 предложений. Будь поддерживающим.";
+
+/* Recommendation prompt */
+"recommendation_user" = "Для приёма '%@' (%@ ккал):\nПредложи здоровую альтернативу или улучшение.";
+
+/* LLM errors */
+"llm_not_configured" = "LLM не настроен";
+"llm_network_error" = "Ошибка сети";
+"llm_unauthorized" = "Неверный API-ключ";
+"llm_server_error" = "Ошибка сервера";
+"llm_empty_response" = "Пустой ответ от LLM";
+"llm_parse_error" = "Не удалось разобрать ответ LLM";

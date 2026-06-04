@@ -3,6 +3,7 @@ import SwiftData
 
 struct DashboardView: View {
     @Binding var selectedDate: Date
+    @StateObject private var languageManager = AppLanguageManager.shared
 
     struct ManualDraftStructure {
         struct DraftItem {
@@ -82,9 +83,9 @@ struct DashboardView: View {
 
                     DisclosureGroup("Питание") {
                         ForEach(windows) { window in
-                            let event = latestEvent(for: window.name)
+                            let event = latestEvent(for: window.windowId)
                             MealSlotCard(
-                                windowLabel: window.name,
+                                windowLabel: window.localizedName(language: languageManager.effectiveLanguage),
                                 timeRange: "\(window.startTimeString)–\(window.endTimeString)",
                                 event: event,
                                 violations: event.flatMap { ruleEngine.violationsForMeal($0) } ?? [],
@@ -93,7 +94,7 @@ struct DashboardView: View {
                                     if let event {
                                         editingEvent = event
                                     } else {
-                                        selectedWindow = window.name
+                                        selectedWindow = window.windowId
                                         logText = ""
                                     }
                                 }

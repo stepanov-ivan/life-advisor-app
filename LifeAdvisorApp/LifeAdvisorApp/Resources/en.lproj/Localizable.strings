@@ -1,0 +1,161 @@
+/* Tab Bar */
+"Дашборд" = "Dashboard";
+"Аналитика" = "Analytics";
+"Правила" = "Rules";
+"Настройки" = "Settings";
+
+/* Settings */
+"LLM" = "LLM";
+"Endpoint" = "Endpoint";
+"API-ключ" = "API Key";
+"Модель" = "Model";
+"Цель" = "Goal";
+"Режим" = "Mode";
+"Калории" = "Calories";
+"Калькулятор" = "Calculator";
+"Калории в день" = "Calories per day";
+"ккал" = "kcal";
+"Пересчитать через калькулятор" = "Recalculate via calculator";
+"Окна питания" = "Meal Windows";
+"Нет окон питания" = "No meal windows";
+"Название" = "Name";
+"Начало" = "Start";
+"Конец" = "End";
+"Новое окно" = "New Window";
+"Добавить окно" = "Add Window";
+"Максимум 6 окон питания" = "Maximum 6 meal windows";
+"Память" = "Memory";
+"Память пока пустая" = "Memory is empty";
+"Шаблоны" = "Templates";
+"Гипотезы" = "Hypotheses";
+"Data-gap" = "Data Gaps";
+"Сбросить всю память" = "Reset All Memory";
+"Удалить все memory-записи?" = "Delete all memory records?";
+"Удалить всё" = "Delete All";
+"Отмена" = "Cancel";
+
+/* Language */
+"Язык" = "Language";
+"System" = "System";
+"English" = "English";
+"Русский" = "Русский";
+
+/* Onboarding */
+"Подключите LLM" = "Connect LLM";
+"Введите данные вашего AI-провайдера.\nЭто как в Cursor — endpoint, ключ и модель." = "Enter your AI provider details.\nJust like in Cursor — endpoint, key, and model.";
+"Ваша цель" = "Your Goal";
+"Укажите дневную норму калорий.\nПоддерживается только здоровый дефицит." = "Set your daily calorie target.\nOnly healthy deficit is supported.";
+"Окна питания" = "Meal Windows";
+"Стандартные окна можно изменить.\nУведомления помогут не забыть записать приём пищи." = "Default windows can be changed.\nNotifications help you remember to log meals.";
+"Подробная настройка окон — в настройках приложения" = "Detailed window setup — in app settings";
+"Далее" = "Next";
+"Начать" = "Start";
+"Рассчитать" = "Calculate";
+"Рекомендуемая норма: %d ккал/день" = "Recommended: %d kcal/day";
+
+/* Calculator */
+"Пол" = "Gender";
+"Мужской" = "Male";
+"Женский" = "Female";
+"Возраст" = "Age";
+"Рост (см)" = "Height (cm)";
+"Вес (кг)" = "Weight (kg)";
+"Активность" = "Activity";
+"Сидячий" = "Sedentary";
+"Лёгкая" = "Light";
+"Средняя" = "Moderate";
+"Активный" = "Active";
+"Спортивный" = "Athlete";
+
+/* Dashboard & Meal */
+"Пропущено" = "Skipped";
+"Оценка..." = "Estimating...";
+"Последняя оценка не обновлена" = "Last estimate not updated";
+"Записать приём пищи" = "Log meal";
+"Правила питания" = "Nutrition Rules";
+"Нет данных за сегодня" = "No data for today";
+"Нет данных" = "No data";
+
+/* Notifications */
+"Запиши, что ты съел" = "Log what you ate";
+"Не все приёмы записаны" = "Not all meals logged";
+"Заполни оставшиеся, чтобы получить совет дня" = "Fill in the rest to get your daily advice";
+"Твой совет дня готов" = "Your daily advice is ready";
+"Открой приложение, чтобы узнать анализ питания" = "Open the app to see your nutrition analysis";
+"Записать" = "Log";
+"Не ел" = "Skipped";
+"Напомнить позже" = "Remind later";
+
+/* Meal window names */
+"breakfast_name" = "Breakfast";
+"lunch_name" = "Lunch";
+"dinner_name" = "Dinner";
+
+/* Errors */
+"Ошибка загрузки правил" = "Error loading rules";
+"Выкл" = "Off";
+"День" = "Day";
+"Неделя" = "Week";
+"Месяц" = "Month";
+"Период" = "Period";
+"Нарушения" = "Violations";
+"Нарушений нет" = "No violations";
+"Мин: %@" = "Min: %@";
+"Макс: %@" = "Max: %@";
+"Отклонение: %@" = "Deviation: %@";
+"Открыть приём" = "Open meal";
+"Нарушено" = "Violated";
+"Внимание" = "Warning";
+"%@ из %@" = "%@ of %@";
+"%d из %d правил соблюдаются" = "%d of %d rules are compliant";
+"Питание" = "Meals";
+"Календарь" = "Calendar";
+"Будущие даты недоступны" = "Future dates are unavailable";
+"OK" = "OK";
+"Нет данных за выбранный период" = "No data for the selected period";
+"Калории" = "Calories";
+"Цель: %d" = "Goal: %d";
+"БЖУ" = "Macros";
+"Белки %dг" = "Protein %dg";
+"Жиры %dг" = "Fat %dg";
+"Углеводы %dг" = "Carbs %dg";
+"Дефицит" = "Deficit";
+"Распределение по окнам" = "Distribution by windows";
+"В норме" = "Normal";
+"Перебор" = "Above target";
+"Недобор" = "Below target";
+"Б" = "P";
+"Ж" = "F";
+"У" = "C";
+"Уточнение предпочтения" = "Preference confirmation";
+"Да" = "Yes";
+"Нет" = "No";
+"Спросить позже" = "Ask later";
+"Текст" = "Text";
+"Текст изменён. Структура может быть неактуальна." = "Text changed. Structured data may be outdated.";
+"Синхронизация" = "Sync";
+"Оценка с низкой уверенностью. Можно уточнить текст." = "Low-confidence estimate. You can clarify the text.";
+"Не хватает точной порции или контекста. Уточнение граммовки повышает точность." = "Portion size or context is missing. Clarifying grams improves accuracy.";
+"Совет" = "Advice";
+"Состав блюда" = "Meal structure";
+"Нет позиций для редактирования. Сначала выполните оценку." = "No items available for editing. Estimate the meal first.";
+"Продукт" = "Product";
+"г" = "g";
+"Ккал" = "kcal";
+"Очистить состав" = "Clear structure";
+"Отправка..." = "Submitting...";
+"Пересчитать по тексту" = "Re-estimate from text";
+"Готово" = "Done";
+"Оставить структуру" = "Keep structure";
+"По умолчанию лучше переоценить. Можно оставить текущую структуру и сохранить текст как заметку." = "Re-estimating is recommended by default. You can keep the current structure and save the text as a note.";
+"Очистить" = "Clear";
+"Из памяти" = "From memory";
+"Уточнить порцию" = "Adjust portion";
+"Если оставить структуру, текст сохранится как заметка и не повлияет на расчёт." = "If you keep the structure, the text will be saved as a note and will not affect calculation.";
+"Выбрать" = "Select";
+"Выбор даты" = "Select date";
+"Что съели?" = "What did you eat?";
+"Дата" = "Date";
+"Белки (г)" = "Protein (g)";
+"Жиры (г)" = "Fat (g)";
+"Углеводы (г)" = "Carbs (g)";

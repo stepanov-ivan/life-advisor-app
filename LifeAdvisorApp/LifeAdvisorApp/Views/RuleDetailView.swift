@@ -6,6 +6,7 @@ struct RuleDetailView: View {
     let rule: RuleDefinition
     @Environment(\.modelContext) private var modelContext
     @State private var engine = RuleEngine()
+    @StateObject private var languageManager = AppLanguageManager.shared
     @Binding var selectedDate: Date
     @Binding var selectedTab: Int
 
@@ -13,10 +14,11 @@ struct RuleDetailView: View {
     @State private var violations: [RuleViolation] = []
 
     var body: some View {
+        let localizer = RulePresentationLocalizer(language: languageManager.effectiveLanguage)
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 // Description
-                Text(rule.description)
+                Text(localizer.ruleDescription(for: rule.id))
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .padding(.horizontal)
@@ -49,7 +51,7 @@ struct RuleDetailView: View {
             }
             .padding(.vertical)
         }
-        .navigationTitle(rule.title)
+        .navigationTitle(localizer.ruleTitle(for: rule.id))
         .onAppear {
             engine.configure(context: modelContext)
             loadData()
@@ -137,14 +139,14 @@ struct RuleDetailView: View {
             if let lower = rule.params.lower {
                 HStack(spacing: 4) {
                     Circle().fill(.red).frame(width: 8, height: 8)
-                    Text("Мин: \(String(format: "%.0f", lower))")
+                    Text(String(format: LocalizationHelper.localized("Мин: %@", table: "Localizable", language: languageManager.effectiveLanguage), String(format: "%.0f", lower)))
                         .font(.caption)
                 }
             }
             if let upper = rule.params.upper {
                 HStack(spacing: 4) {
                     Circle().fill(.red).frame(width: 8, height: 8)
-                    Text("Макс: \(String(format: "%.0f", upper))")
+                    Text(String(format: LocalizationHelper.localized("Макс: %@", table: "Localizable", language: languageManager.effectiveLanguage), String(format: "%.0f", upper)))
                         .font(.caption)
                 }
             }
@@ -172,7 +174,7 @@ struct RuleDetailView: View {
                 Text(engine.violationDescription(for: violation))
                     .font(.caption)
                     .foregroundColor(.secondary)
-                Text("Отклонение: \(String(format: "%.1f", violation.magnitude))")
+                Text(String(format: LocalizationHelper.localized("Отклонение: %@", table: "Localizable", language: languageManager.effectiveLanguage), String(format: "%.1f", violation.magnitude)))
                     .font(.caption)
                     .foregroundColor(.secondary)
 
@@ -194,7 +196,7 @@ struct RuleDetailView: View {
                 Text(formatter.string(from: violation.date))
                     .font(.subheadline)
                 Spacer()
-                Text(violation.zone == "violation" ? "Нарушено" : "Внимание")
+                Text(violation.zone == "violation" ? LocalizationHelper.localized("Нарушено", table: "Localizable", language: languageManager.effectiveLanguage) : LocalizationHelper.localized("Внимание", table: "Localizable", language: languageManager.effectiveLanguage))
                     .font(.caption)
                     .foregroundColor(violation.zone == "violation" ? .red : .yellow)
             }

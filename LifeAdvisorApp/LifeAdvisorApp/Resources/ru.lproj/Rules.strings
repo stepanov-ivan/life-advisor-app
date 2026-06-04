@@ -1,0 +1,80 @@
+/* Rules table - Russian */
+
+/* Category names */
+"macronutrient_balance" = "Баланс макронутриентов";
+"restrictions" = "Ограничения";
+"food_quality" = "Качество продуктов";
+"eating_pattern" = "Режим питания";
+
+/* Section titles */
+"section_macros" = "Баланс макронутриентов";
+"section_restrictions" = "Ограничения";
+"section_quality_pattern" = "Качество продуктов и режим";
+
+/* Rule titles */
+"who_protein" = "Белок в норме";
+"who_total_fat" = "Жиры в норме";
+"who_saturated_fat" = "Насыщенные жиры";
+"who_trans_fat" = "Трансжиры";
+"who_pufa" = "ПНЖК";
+"who_carbs" = "Углеводы в норме";
+"who_free_sugar" = "Добавленный сахар";
+"who_sodium" = "Натрий";
+"who_energy_balance" = "Энергетический баланс";
+"who_fiber" = "Клетчатка";
+"who_fruits_vegetables" = "Фрукты и овощи";
+"who_whole_grain" = "Цельные злаки";
+"who_legumes_nuts" = "Бобовые и орехи";
+"who_red_meat" = "Красное мясо";
+"who_processed_meat" = "Обработанное мясо";
+"who_meal_regularity" = "Регулярность питания";
+
+/* Rule descriptions */
+"who_protein_desc" = "10–15% от дневных калорий";
+"who_total_fat_desc" = "15–30% от дневных калорий";
+"who_saturated_fat_desc" = "Не более 10% от дневных калорий";
+"who_trans_fat_desc" = "Не более 1% от дневных калорий";
+"who_pufa_desc" = "6–10% от дневных калорий";
+"who_carbs_desc" = "45–75% от дневных калорий";
+"who_free_sugar_desc" = "Не более 10% от дневных калорий";
+"who_sodium_desc" = "Не более 2000 мг в день";
+"who_energy_balance_desc" = "Потребление в пределах 15% от цели";
+"who_fiber_desc" = "Не менее 25 г в день";
+"who_fruits_vegetables_desc" = "Не менее 400 г в день";
+"who_whole_grain_desc" = "Цельнозерновые продукты присутствуют в рационе";
+"who_legumes_nuts_desc" = "Бобовые или орехи присутствуют в рационе";
+"who_red_meat_desc" = "Не более 500 г в неделю";
+"who_processed_meat_desc" = "Избегать обработанных мясных продуктов";
+"who_meal_regularity_desc" = "Не более 3 пропущенных приёмов в неделю";
+
+/* Violation reason descriptions */
+"exceeds_upper" = "%@: %@ при норме %@";
+"approaching_upper" = "%@: %@ приближается к %@";
+"below_lower" = "%@: %@ при норме %@";
+"approaching_lower" = "%@: %@ приближается к %@";
+"category_missing" = "%@: категория отсутствует в дневном рационе";
+"unwanted_category_present" = "%@: нежелательная категория присутствует";
+
+/* Rule detail format */
+"rule_value_format" = "%@ из %@";
+
+/* Food category names for violations */
+"category_whole_grain" = "цельные злаки";
+"category_legume_or_nut" = "бобовые/орехи/семена";
+"category_processed_meat" = "обработанное мясо";
+"category_legume" = "бобовые";
+"category_nut_seed" = "орехи/семена";
+"category_fruit" = "фрукты";
+"category_vegetable" = "овощи";
+"category_red_meat" = "красное мясо";
+
+/* Violation zone labels */
+"zone_normal" = "В норме";
+"zone_warning" = "Внимание";
+"zone_violation" = "Нарушено";
+"zone_no_data" = "Нет данных";
+
+/* Skip-related */
+"skips_format" = "%d пропусков";
+"excessive_skips" = "Много пропусков: %d за неделю";
+"some_skips" = "Есть пропуски приёмов: %d за неделю";

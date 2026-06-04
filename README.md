@@ -60,4 +60,8 @@ LifeAdvisorApp/
 ├── Services/               # Business logic (rule engine, LLM client, memory)
 ├── Views/                  # UI screens (dashboard, analytics, settings)
 └── Resources/              # Nutrition rules config, food database
+
+## License
+
+MIT — see [LICENSE](LICENSE)
 ```

@@ -1,0 +1,46 @@
+name: Bug report
+description: Report a reproducible bug in Life Advisor
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the exact steps that reproduce the bug.
+      placeholder: |
+        1. Open ...
+        2. Enter meal text ...
+        3. Tap ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Device or simulator model, iOS version, and Xcode version if relevant.
+  - type: textarea
+    id: notes
+    attributes:
+      label: Extra context
+      description: Add screenshots, sample input, or logs if useful.

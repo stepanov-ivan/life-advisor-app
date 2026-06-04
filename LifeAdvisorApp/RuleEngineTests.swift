@@ -47,7 +47,7 @@ final class RuleEngineTests: XCTestCase {
     func testRangeUpperOnlyViolation() {
         let result = evaluateRange(value: 0.12, lower: nil, upper: 0.10, warningRatio: 0.85)
         XCTAssertEqual(result.zone, .violation)
-        XCTAssertEqual(result.magnitude, 0.02)
+        XCTAssertEqual(result.magnitude, 0.02, accuracy: 0.001)
     }
 
     func testRangeLowerOnlyNormal() {

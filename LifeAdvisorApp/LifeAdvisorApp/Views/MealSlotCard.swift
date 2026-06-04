@@ -18,6 +18,8 @@ struct MealSlotCard: View {
     private var productViolationMap: [String: [ProductViolation]] {
         var map: [String: [ProductViolation]] = [:]
         for violation in violations {
+            // Пропускаем below_lower и approaching_lower — продукты не виноваты в недостатке
+            guard !["below_lower", "approaching_lower"].contains(violation.reasonCode) else { continue }
             guard let json = violation.contributionJSON,
                   let data = json.data(using: .utf8),
                   let entries = try? JSONDecoder().decode([RuleEngine.ContributionEntry].self, from: data) else {
@@ -121,9 +123,12 @@ struct MealSlotCard: View {
                             }
                         }
 
-                        if !violations.isEmpty {
+                        let relevantViolations = violations.filter {
+                            ["exceeds_upper", "approaching_upper", "unwanted_category_present"].contains($0.reasonCode)
+                        }
+                        if !relevantViolations.isEmpty {
                             Divider()
-                            ForEach(violations.prefix(3)) { violation in
+                            ForEach(relevantViolations.prefix(3)) { violation in
                                 let desc = engine.violationDescription(for: violation)
                                 HStack(alignment: .top, spacing: 4) {
                                     Circle()
@@ -134,15 +139,6 @@ struct MealSlotCard: View {
                                         .font(.caption)
                                         .foregroundColor(violation.zone == "violation" ? .red : .yellow)
                                 }
-                            }
-                        } else if event.status == .structured {
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(Color.green)
-                                    .frame(width: 6, height: 6)
-                                Text("Все правила соблюдены")
-                                    .font(.caption)
-                                    .foregroundColor(.green)
                             }
                         }
                     }

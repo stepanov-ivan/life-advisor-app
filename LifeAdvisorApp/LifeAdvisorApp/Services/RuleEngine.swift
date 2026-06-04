@@ -568,13 +568,26 @@ final class RuleEngine {
 
         guard !items.isEmpty else { return [] }
 
+        // Для percent-полей продукт сам должен быть значимым источником нутриента
+        let percentFields: Set<String> = ["fatPercent", "saturatedFatPercent", "transFatPercent", "proteinPercent", "carbsPercent", "sugarPercent"]
+        let significantItems: Set<ObjectIdentifier>? = {
+            guard percentFields.contains(field), let upper = rule.params.upper else { return nil }
+            let sig = items.filter { item in
+                let itemValue = itemValueForField(field, item: item)
+                let result = evaluateRange(value: itemValue, lower: nil, upper: upper, warningRatio: rule.warningRatio)
+                return result.zone != .normal
+            }
+            return Set(sig.map { ObjectIdentifier($0) })
+        }()
+
         let entries: [ContributionEntry]
         switch field {
         case "fatPercent", "saturatedFatPercent", "transFatPercent":
             let totalNutrient = items.reduce(0) { $0 + $1.estimatedFats }
             guard totalNutrient > 0 else { return [] }
-            entries = items.map { item in
-                ContributionEntry(
+            entries = items.compactMap { item in
+                guard significantItems?.contains(ObjectIdentifier(item)) ?? true else { return nil }
+                return ContributionEntry(
                     itemId: item.persistentModelID.storeIdentifier ?? "",
                     name: item.name,
                     percent: (item.estimatedFats / totalNutrient) * 100
@@ -583,8 +596,9 @@ final class RuleEngine {
         case "proteinPercent":
             let totalNutrient = items.reduce(0) { $0 + $1.estimatedProteins }
             guard totalNutrient > 0 else { return [] }
-            entries = items.map { item in
-                ContributionEntry(
+            entries = items.compactMap { item in
+                guard significantItems?.contains(ObjectIdentifier(item)) ?? true else { return nil }
+                return ContributionEntry(
                     itemId: item.persistentModelID.storeIdentifier ?? "",
                     name: item.name,
                     percent: (item.estimatedProteins / totalNutrient) * 100
@@ -593,8 +607,9 @@ final class RuleEngine {
         case "carbsPercent":
             let totalNutrient = items.reduce(0) { $0 + $1.estimatedCarbs }
             guard totalNutrient > 0 else { return [] }
-            entries = items.map { item in
-                ContributionEntry(
+            entries = items.compactMap { item in
+                guard significantItems?.contains(ObjectIdentifier(item)) ?? true else { return nil }
+                return ContributionEntry(
                     itemId: item.persistentModelID.storeIdentifier ?? "",
                     name: item.name,
                     percent: (item.estimatedCarbs / totalNutrient) * 100
@@ -603,8 +618,9 @@ final class RuleEngine {
         case "sugarPercent":
             let totalNutrient = items.reduce(0) { $0 + $1.estimatedSugar }
             guard totalNutrient > 0 else { return [] }
-            entries = items.map { item in
-                ContributionEntry(
+            entries = items.compactMap { item in
+                guard significantItems?.contains(ObjectIdentifier(item)) ?? true else { return nil }
+                return ContributionEntry(
                     itemId: item.persistentModelID.storeIdentifier ?? "",
                     name: item.name,
                     percent: (item.estimatedSugar / totalNutrient) * 100
@@ -673,13 +689,17 @@ final class RuleEngine {
         }
 
         return entries
-            .filter { $0.percent > 30 }
+            .filter { $0.percent > 33 }
             .sorted { $0.percent > $1.percent }
             .prefix(3)
             .map { $0 }
     }
 
     private func contributionForPresenceRule(_ rule: RuleDefinition, date: Date, context: ModelContext) -> [ContributionEntry] {
+        // category_missing: не подсвечиваем продукты — это нарушение дня, а не продукта
+        let inverse = rule.params.inverse ?? false
+        guard inverse else { return [] }
+
         guard let category = rule.params.category else { return [] }
         let items = fetchItems(for: [date], context: context)
             .filter { item in
@@ -688,12 +708,10 @@ final class RuleEngine {
             }
 
         let targetCategories = category == "legume_or_nut" ? ["legume", "nut_seed"] : [category]
-        let inverse = rule.params.inverse ?? false
 
         return items.compactMap { item in
             let match = targetCategories.contains(item.foodCategory ?? "")
-            let isRelevant = inverse ? !match : match
-            guard isRelevant else { return nil }
+            guard match else { return nil }
             return ContributionEntry(
                 itemId: item.persistentModelID.storeIdentifier ?? "",
                 name: item.name,
@@ -758,9 +776,17 @@ final class RuleEngine {
         case "saturatedFatPercent":
             guard item.estimatedCalories > 0 else { return 0 }
             return (item.estimatedSaturatedFats * 9) / item.estimatedCalories
+        case "proteinPercent":
+            guard item.estimatedCalories > 0 else { return 0 }
+            return (item.estimatedProteins * 4) / item.estimatedCalories
+        case "carbsPercent":
+            guard item.estimatedCalories > 0 else { return 0 }
+            return (item.estimatedCarbs * 4) / item.estimatedCalories
         case "sugarPercent":
             guard item.estimatedCalories > 0 else { return 0 }
             return (item.estimatedSugar * 4) / item.estimatedCalories
+        case "energyBalancePercent":
+            return item.estimatedCalories
         case "sodiumMg":
             return item.estimatedSodium
         case "fiberGrams":
@@ -925,19 +951,19 @@ final class RuleEngine {
         switch violation.reasonCode {
         case "exceeds_upper":
             let metric = formattedMetric(for: rule, date: violation.date)
-            return "Превышение: \(metric.valueFormatted) при норме \(metric.thresholdFormatted)"
+            return "\(rule.title): \(metric.valueFormatted) при норме \(metric.thresholdFormatted)"
 
         case "below_lower":
             let metric = formattedMetric(for: rule, date: violation.date)
-            return "Недостаточно: \(metric.valueFormatted) при норме \(metric.thresholdFormatted)"
+            return "\(rule.title): \(metric.valueFormatted) при норме \(metric.thresholdFormatted)"
 
         case "approaching_upper":
             let metric = formattedMetric(for: rule, date: violation.date)
-            return "Близко к пределу: \(metric.valueFormatted) при норме \(metric.thresholdFormatted)"
+            return "\(rule.title): \(metric.valueFormatted) при норме \(metric.thresholdFormatted)"
 
         case "approaching_lower":
             let metric = formattedMetric(for: rule, date: violation.date)
-            return "Близко к минимуму: \(metric.valueFormatted) при норме \(metric.thresholdFormatted)"
+            return "\(rule.title): \(metric.valueFormatted) при норме \(metric.thresholdFormatted)"
 
         case "category_missing":
             let categoryTitle = russianCategoryName(rule.params.category)

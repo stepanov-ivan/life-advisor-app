@@ -1,0 +1,47 @@
+## MODIFIED Requirements
+
+### Requirement: Индикатор продукта-нарушителя в карточке приёма
+Система SHALL показывать цветной кружок и стрелку раскрытия рядом с продуктом в `MealSlotCard`, если правило нарушено с `reasonCode = "exceeds_upper"` или `"approaching_upper"` и вклад продукта превышает 33%, либо если правило нарушено с `reasonCode = "unwanted_category_present"` и продукт содержит нежелательную категорию. Система SHALL NOT подсвечивать продукты для `reasonCode = "below_lower"`, `"approaching_lower"` или `"category_missing"`.
+
+#### Scenario: Продукт с одним превышением
+- **WHEN** продукт «Пирожное» даёт 45% дневного сахара, правило `added_sugar` нарушено (`exceeds_upper`)
+- **THEN** перед названием продукта показывается красный кружок и стрелка раскрытия
+
+#### Scenario: Продукт с несколькими превышениями
+- **WHEN** продукт «Сливочное масло» даёт 52% насыщенных жиров и 38% общих жиров, оба правила нарушены (`exceeds_upper`)
+- **THEN** перед названием продукта показывается красный кружок (по худшей зоне) и стрелка раскрытия
+
+#### Scenario: Продукт с недостаточным вкладом
+- **WHEN** правило `added_sugar` нарушено (`exceeds_upper`), но продукт даёт только 25% дневного сахара
+- **THEN** продукт не подсвечивается
+
+#### Scenario: Правило с below_lower — продукт не подсвечивается
+- **WHEN** правило `protein` нарушено (`below_lower`), курица даёт 40% дневного белка
+- **THEN** продукт не подсвечивается — нарушение не показывается в карточке
+
+#### Scenario: Правило с category_missing — продукт не подсвечивается
+- **WHEN** правило `whole_grain` нарушено (`category_missing`)
+- **THEN** ни один продукт не подсвечивается, нарушение не показывается в карточке
+
+#### Scenario: Продукт с нежелательной категорией
+- **WHEN** правило `ultra_processed` нарушено (`unwanted_category_present`), продукт «Чипсы» имеет категорию `ultra_processed`
+- **THEN** продукт подсвечивается красным кружком
+
+### Requirement: Парсинг contributionJSON для сопоставления продукт → нарушения
+Система SHALL в `MealSlotCard` собирать данные о вкладе продуктов из `contributionJSON` нарушений приёма, фильтруя по `reasonCode`: только `exceeds_upper`, `approaching_upper` и `unwanted_category_present`. Нарушения с `below_lower`, `approaching_lower` и `category_missing` пропускаются. Результат — словарь `[itemID: [(ruleId, ruleTitle, percent, zone)]]`.
+
+#### Scenario: Несколько нарушений с разными продуктами
+- **WHEN** приём содержит продукты A и B, violation_1 (`exceeds_upper`) ссылается на A (45%), violation_2 (`exceeds_upper`) ссылается на B (38%)
+- **THEN** продукт A показывает violation_1, продукт B показывает violation_2
+
+#### Scenario: Один продукт в нескольких нарушениях
+- **WHEN** приём содержит продукт A, violation_1 и violation_2 (оба `exceeds_upper`) оба ссылаются на A
+- **THEN** при раскрытии продукта A показываются оба нарушения
+
+#### Scenario: Нарушение с below_lower пропускается
+- **WHEN** приём содержит violation с `reasonCode = "below_lower"` и contributionJSON с продуктом A (40%)
+- **THEN** продукт A не добавляется в словарь подсветки, нарушение не показывается в карточке
+
+#### Scenario: contributionJSON отсутствует
+- **WHEN** нарушение имеет `contributionJSON = nil` (например, пропуск приёма или category_missing)
+- **THEN** нарушение не участвует в подсветке продуктов

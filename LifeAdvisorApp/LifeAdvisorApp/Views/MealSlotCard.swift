@@ -7,6 +7,7 @@ struct MealSlotCard: View {
     let violations: [RuleViolation]
     let engine: RuleEngine
     let onTap: () -> Void
+    @StateObject private var languageManager = AppLanguageManager.shared
 
     private struct ProductViolation {
         let ruleId: String
@@ -25,8 +26,8 @@ struct MealSlotCard: View {
                   let entries = try? JSONDecoder().decode([RuleEngine.ContributionEntry].self, from: data) else {
                 continue
             }
-            let ruleDef = engine.allRules().first { $0.id == violation.ruleId }
-            let ruleTitle = ruleDef?.title ?? violation.ruleId
+            let localizer = RulePresentationLocalizer(language: languageManager.effectiveLanguage)
+            let ruleTitle = engine.allRules().first(where: { $0.id == violation.ruleId }).map { localizer.ruleTitle(for: $0.id) } ?? violation.ruleId
             for entry in entries {
                 let pv = ProductViolation(
                     ruleId: violation.ruleId,

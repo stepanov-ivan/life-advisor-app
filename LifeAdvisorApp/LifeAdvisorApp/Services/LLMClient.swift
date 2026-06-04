@@ -268,54 +268,8 @@ enum LLMClient {
     }
 
     static func estimateMeal(text: String) async throws -> (parsed: EstimationResult, rawPayload: String) {
-        let systemPrompt = """
-        Ты — агент оценки питания. Верни ТОЛЬКО валидный JSON.
-        Формат:
-        {
-          "mode": "ingredient_breakdown|composite_item",
-          "totals": {
-            "calories": number, "proteins": number, "fats": number, "carbs": number,
-            "saturated_fats": number|null,
-            "sugar": number|null,
-            "fiber": number|null,
-            "sodium": number|null
-          },
-          "confidence": "low|medium|high",
-          "items": [{
-            "name": string,            // ТОЛЬКО чистое имя продукта/блюда без количества, скобок, тильды и служебных слов
-            "grams": number,           // ОБЯЗАТЕЛЬНО > 0
-            "estimatedCalories": number,
-            "estimatedProteins": number,
-            "estimatedFats": number,
-            "estimatedCarbs": number,
-            "impact_score": number,
-            "reason": string,
-            "high_calorie_flag": bool,
-            "saturated_fats": number|null,
-            "sugar": number|null,
-            "fiber": number|null,
-            "sodium": number|null,
-            "food_category": "fruit"|"vegetable"|"whole_grain"|"legume"|"nut_seed"|"red_meat"|"processed_meat"|"other"|null
-          }],
-          "assumptions": [string],
-          "modelId": string,
-          "promptVersion": "v3",
-          "estimationSchemaVersion": "v3"
-        }
-        Дополнительные поля (опциональны, можно null):
-        - saturated_fats: насыщенные жиры в граммах
-        - sugar: свободный сахар в граммах
-        - fiber: клетчатка в граммах
-        - sodium: натрий в миллиграммах
-        - food_category: категория продукта (fruit, vegetable, whole_grain, legume, nut_seed, red_meat, processed_meat, other)
-
-        Для каждого item:
-        1) grams обязателен, не пропускай.
-        2) Если точная граммовка неизвестна, всё равно оцени и укажи grams.
-        3) name должен быть чистым: "картофель", "минтай", "квашеная капуста".
-           Нельзя: "3 средние картошки", "картошка (порция)", "~порция".
-        Для composite_item верни минимум один item.
-        """
+        let builder = PromptBuilder(language: AppLanguageManager.currentEffectiveLanguage)
+        let systemPrompt = builder.mealEstimationSystemPrompt() + "\n\nJSON Schema:\n" + builder.mealEstimationJSONSchema() + "\n\nRequirements: grams required, clean item names only, at least one item for composite_item."
 
         let response = try await chat(userMessage: text, systemPrompt: systemPrompt, jsonMode: true)
         guard let data = response.data(using: .utf8) else {
@@ -332,22 +286,13 @@ enum LLMClient {
         goalCalories: Double,
         skippedWindows: [String]
     ) async throws -> String {
-        let mealsText = meals.map {
-            "\($0.window): \(Int($0.calories)) ккал (Б:\(Int($0.proteins)) Ж:\(Int($0.fats)) У:\(Int($0.carbs)))"
-        }.joined(separator: "\n")
-
-        let skippedText = skippedWindows.isEmpty ? "" : "\nПропущенные приёмы: \(skippedWindows.joined(separator: ", "))"
-
-        let userMessage = """
-        Цель: \(Int(goalCalories)) ккал
-
-        Съедено за день:
-        \(mealsText)\(skippedText)
-
-        Дай краткий совет дня.
-        """
-
-        return try await chat(userMessage: userMessage, systemPrompt: "Ты персональный диетолог")
+        let builder = PromptBuilder(language: AppLanguageManager.currentEffectiveLanguage)
+        let userMessage = builder.dailyAdviceUserMessage(
+            goalCalories: goalCalories,
+            meals: meals,
+            skippedWindows: skippedWindows
+        )
+        return try await chat(userMessage: userMessage, systemPrompt: builder.dailyAdviceSystemPrompt())
     }
 
     static func recommendation(
@@ -355,19 +300,13 @@ enum LLMClient {
         remainingWindows: [String],
         goalCalories: Double
     ) async throws -> String {
-        let eatenText = eaten.map {
-            "\($0.window): \(Int($0.calories)) ккал (Б:\(Int($0.proteins)) Ж:\(Int($0.fats)) У:\(Int($0.carbs)))"
-        }.joined(separator: "\n")
-
-        let userMessage = """
-        Цель: \(Int(goalCalories)) ккал
-        Уже съедено:
-        \(eatenText)
-        Остались окна: \(remainingWindows.joined(separator: ", "))
-
-        Дай рекомендацию по распределению калорий и БЖУ.
-        """
-        return try await chat(userMessage: userMessage, systemPrompt: "Ты персональный диетолог")
+        let builder = PromptBuilder(language: AppLanguageManager.currentEffectiveLanguage)
+        let userMessage = builder.recommendationUserMessage(
+            goalCalories: goalCalories,
+            eaten: eaten,
+            remainingWindows: remainingWindows
+        )
+        return try await chat(userMessage: userMessage, systemPrompt: builder.dailyAdviceSystemPrompt())
     }
 }
 
@@ -380,13 +319,6 @@ enum LLMError: Error, LocalizedError {
     case parseError(String)
 
     var errorDescription: String? {
-        switch self {
-        case .notConfigured: return "LLM не настроен. Укажите endpoint, ключ и модель в настройках."
-        case .networkError: return "Нет соединения с сервером."
-        case .unauthorized: return "Ошибка авторизации. Проверьте API-ключ."
-        case .serverError(let code): return "Ошибка сервера (\(code))."
-        case .emptyResponse: return "Пустой ответ от LLM."
-        case .parseError(let reason): return "Не удалось разобрать ответ LLM: \(reason)."
-        }
+        PromptBuilder(language: AppLanguageManager.currentEffectiveLanguage).localizedLLMError(self)
     }
 }

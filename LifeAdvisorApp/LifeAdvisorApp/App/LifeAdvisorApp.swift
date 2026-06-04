@@ -4,6 +4,7 @@ import SwiftData
 @main
 struct LifeAdvisorApp: App {
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    @StateObject private var languageManager = AppLanguageManager.shared
     private static let schemaResetVersion = "nutrition-rules-v1"
     private static let schemaResetVersionKey = "storage_schema_reset_version"
 
@@ -52,8 +53,10 @@ struct LifeAdvisorApp: App {
         WindowGroup {
             if hasCompletedOnboarding {
                 ContentView()
+                    .environment(\.locale, languageManager.locale)
             } else {
                 OnboardingView()
+                    .environment(\.locale, languageManager.locale)
             }
         }
         .modelContainer(modelContainer)
@@ -64,14 +67,16 @@ struct LifeAdvisorApp: App {
         let descriptor = FetchDescriptor<MealWindow>()
         guard let count = try? context.fetchCount(descriptor), count == 0 else { return }
 
-        let windows: [(String, Int, Int, Int, Int)] = [
-            ("Завтрак", 7, 0, 10, 0),
-            ("Обед", 12, 0, 15, 0),
-            ("Ужин", 18, 0, 21, 0)
+        let language = languageManager.effectiveLanguage
+        let windows: [(String, String, Int, Int, Int, Int)] = [
+            ("breakfast", LocalizationHelper.localized("breakfast_name", table: "Localizable", language: language), 7, 0, 10, 0),
+            ("lunch", LocalizationHelper.localized("lunch_name", table: "Localizable", language: language), 12, 0, 15, 0),
+            ("dinner", LocalizationHelper.localized("dinner_name", table: "Localizable", language: language), 18, 0, 21, 0)
         ]
 
-        for (i, (name, sh, sm, eh, em)) in windows.enumerated() {
+        for (i, (id, name, sh, sm, eh, em)) in windows.enumerated() {
             let window = MealWindow(
+                windowId: id,
                 name: name,
                 startHour: sh,
                 startMinute: sm,

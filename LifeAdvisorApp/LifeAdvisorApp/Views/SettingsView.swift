@@ -15,6 +15,8 @@ struct SettingsView: View {
     @AppStorage("goal_mode") private var goalMode = "calories"
     @State private var showCalculator = false
 
+    @StateObject private var languageManager = AppLanguageManager.shared
+
     @State private var newWindowName = ""
     @State private var newStartTime = Date()
     @State private var newEndTime = Calendar.current.date(byAdding: .hour, value: 1, to: Date()) ?? Date()
@@ -25,12 +27,26 @@ struct SettingsView: View {
             Form {
                 llmSection
                 goalSection
+                languageSection
                 windowsSection
                 memorySection
             }
             .navigationTitle("Настройки")
             .onAppear {
                 apiKey = KeychainHelper.read(key: "llm_api_key") ?? ""
+            }
+        }
+    }
+
+    private var languageSection: some View {
+        Section("Язык") {
+            Picker("Язык", selection: Binding(
+                get: { languageManager.override },
+                set: { languageManager.setOverride($0) }
+            )) {
+                ForEach(AppLanguage.allCases, id: \.self) { lang in
+                    Text(LocalizationHelper.localized(lang.displayNameKey, table: "Localizable", language: languageManager.effectiveLanguage)).tag(lang)
+                }
             }
         }
     }
@@ -178,13 +194,18 @@ struct SettingsView: View {
 
             ForEach(windows.sorted(by: { $0.order < $1.order })) { window in
                 VStack(alignment: .leading, spacing: 8) {
-                    TextField("Название", text: Binding(
-                        get: { window.name },
-                        set: { newValue in
-                            window.name = newValue
-                            persistWindowsAndReschedule()
-                        }
-                    ))
+                    if window.isSystemDefault {
+                        Text(window.localizedName(language: languageManager.effectiveLanguage))
+                            .font(.headline)
+                    } else {
+                        TextField("Название", text: Binding(
+                            get: { window.name },
+                            set: { newValue in
+                                window.name = newValue
+                                persistWindowsAndReschedule()
+                            }
+                        ))
+                    }
 
                     HStack {
                         DatePicker(
@@ -250,6 +271,7 @@ struct SettingsView: View {
         let end = Calendar.current.dateComponents([.hour, .minute], from: newEndTime)
 
         let window = MealWindow(
+            windowId: UUID().uuidString,
             name: newWindowName.trimmingCharacters(in: .whitespacesAndNewlines),
             startHour: start.hour ?? 7,
             startMinute: start.minute ?? 0,

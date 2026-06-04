@@ -9,6 +9,7 @@ struct OnboardingView: View {
 
     @State private var apiKey = ""
     @State private var currentStep = 0
+    @StateObject private var languageManager = AppLanguageManager.shared
 
     var body: some View {
         VStack {
@@ -114,9 +115,9 @@ struct OnboardingView: View {
                 .foregroundColor(.secondary)
 
             VStack(spacing: 12) {
-                WindowRow(label: "Завтрак", time: "7:00 – 10:00")
-                WindowRow(label: "Обед", time: "12:00 – 15:00")
-                WindowRow(label: "Ужин", time: "18:00 – 21:00")
+                WindowRow(label: LocalizationHelper.localized("breakfast_name", table: "Localizable", language: languageManager.effectiveLanguage), time: "7:00 – 10:00")
+                WindowRow(label: LocalizationHelper.localized("lunch_name", table: "Localizable", language: languageManager.effectiveLanguage), time: "12:00 – 15:00")
+                WindowRow(label: LocalizationHelper.localized("dinner_name", table: "Localizable", language: languageManager.effectiveLanguage), time: "18:00 – 21:00")
             }
             .padding(.horizontal, 32)
 

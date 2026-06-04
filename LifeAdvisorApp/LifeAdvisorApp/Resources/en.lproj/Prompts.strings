@@ -1,0 +1,21 @@
+/* Prompts table - English (base/fallback language) */
+
+/* Meal estimation system prompt */
+"meal_estimation_system" = "You are a nutrition estimation agent. Your task is to parse a meal description and return a structured JSON with estimated nutritional values.";
+
+/* Daily advice user prompt */
+"daily_advice_user" = "Here is what I ate today:\n\n%@\n\nTotal: %@ kcal, Protein: %@g, Fat: %@g, Carbs: %@g\n\nGive me a brief dietary advice for the rest of the day.";
+
+/* Daily advice system prompt */
+"daily_advice_system" = "You are a personal dietitian. Provide brief, actionable nutrition advice based on the user's logged meals. Keep it under 3 sentences. Be supportive.";
+
+/* Recommendation prompt */
+"recommendation_user" = "For the meal '%@' (%@ kcal):\nSuggest a healthy alternative or improvement.";
+
+/* LLM errors */
+"llm_not_configured" = "LLM is not configured";
+"llm_network_error" = "Network error";
+"llm_unauthorized" = "Invalid API key";
+"llm_server_error" = "Server error";
+"llm_empty_response" = "Empty response from LLM";
+"llm_parse_error" = "Failed to parse LLM response";

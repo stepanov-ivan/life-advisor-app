@@ -853,13 +853,14 @@ final class RuleEngine {
             )
 
         case "presence":
-            let label: String
+            let labelKey: String
             switch result.zone {
-            case .normal: label = "В норме"
-            case .warning: label = "Внимание"
-            case .violation: label = "Нарушено"
-            case .noData: label = "Нет данных"
+            case .normal: labelKey = "zone_normal"
+            case .warning: labelKey = "zone_warning"
+            case .violation: labelKey = "zone_violation"
+            case .noData: labelKey = "zone_no_data"
             }
+            let label = LocalizationHelper.localized(labelKey, table: "Rules")
             return RuleMetricDisplay(
                 valueFormatted: label,
                 thresholdFormatted: "",
@@ -870,8 +871,9 @@ final class RuleEngine {
         case "countSkipped":
             let skippedCount = computeSkippedCount(for: date)
             let violationThreshold = Int(rule.params.violationThreshold ?? 4)
+            let skipsLabel = LocalizationHelper.localized("skips_format", table: "Rules")
             return RuleMetricDisplay(
-                valueFormatted: "\(skippedCount) пропусков",
+                valueFormatted: String(format: skipsLabel, skippedCount),
                 thresholdFormatted: "≤\(violationThreshold)",
                 unit: "",
                 zone: result.zone
@@ -944,58 +946,8 @@ final class RuleEngine {
     // MARK: - Violation descriptions
 
     func violationDescription(for violation: RuleViolation) -> String {
-        guard let rule = rules.first(where: { $0.id == violation.ruleId }) else {
-            return violation.reasonCode
-        }
-
-        switch violation.reasonCode {
-        case "exceeds_upper":
-            let metric = formattedMetric(for: rule, date: violation.date)
-            return "\(rule.title): \(metric.valueFormatted) при норме \(metric.thresholdFormatted)"
-
-        case "below_lower":
-            let metric = formattedMetric(for: rule, date: violation.date)
-            return "\(rule.title): \(metric.valueFormatted) при норме \(metric.thresholdFormatted)"
-
-        case "approaching_upper":
-            let metric = formattedMetric(for: rule, date: violation.date)
-            return "\(rule.title): \(metric.valueFormatted) при норме \(metric.thresholdFormatted)"
-
-        case "approaching_lower":
-            let metric = formattedMetric(for: rule, date: violation.date)
-            return "\(rule.title): \(metric.valueFormatted) при норме \(metric.thresholdFormatted)"
-
-        case "category_missing":
-            let categoryTitle = russianCategoryName(rule.params.category)
-            return "Не хватает продуктов категории «\(categoryTitle)»"
-
-        case "unwanted_category_present":
-            let categoryTitle = russianCategoryName(rule.params.category)
-            return "Присутствуют нежелательные продукты: \(categoryTitle)"
-
-        case "excessive_skips":
-            return "Много пропусков: \(Int(violation.magnitude)) за неделю"
-
-        case "some_skips":
-            return "Есть пропуски приёмов: \(Int(violation.magnitude)) за неделю"
-
-        default:
-            return violation.reasonCode
-        }
-    }
-
-    private func russianCategoryName(_ category: String?) -> String {
-        switch category {
-        case "whole_grain": return "цельные злаки"
-        case "legume_or_nut": return "бобовые/орехи/семена"
-        case "processed_meat": return "обработанное мясо"
-        case "legume": return "бобовые"
-        case "nut_seed": return "орехи/семена"
-        case "fruit": return "фрукты"
-        case "vegetable": return "овощи"
-        case "red_meat": return "красное мясо"
-        default: return category ?? "неизвестно"
-        }
+        let localizer = RulePresentationLocalizer(language: AppLanguageManager.currentEffectiveLanguage)
+        return localizer.localizedDescription(for: violation, engine: self)
     }
 
     // MARK: - Summary

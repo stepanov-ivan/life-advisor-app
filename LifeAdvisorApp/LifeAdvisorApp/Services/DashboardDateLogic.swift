@@ -28,19 +28,22 @@ enum DashboardDateLogic {
     }
 
     static func dayKey(for date: Date, calendar: Calendar = .current) -> String {
-        let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.locale = .current
-        formatter.dateFormat = "yyyy-MM-dd"
+        let formatter = dayKeyFormatter(calendar: calendar)
         return formatter.string(from: startOfDay(date, calendar: calendar))
     }
 
     static func date(from dayKey: String, calendar: Calendar = .current) -> Date? {
-        let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.locale = .current
-        formatter.dateFormat = "yyyy-MM-dd"
+        let formatter = dayKeyFormatter(calendar: calendar)
         guard let parsed = formatter.date(from: dayKey) else { return nil }
         return startOfDay(parsed, calendar: calendar)
+    }
+
+    private static func dayKeyFormatter(calendar: Calendar) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
     }
 }

@@ -13,6 +13,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
@@ -20,6 +22,17 @@ jobs:
       - name: Run tests
         run: |
           xcodebuild test \
+            -enableCodeCoverage YES \
+            -resultBundlePath build/TestResults.xcresult \
             -project LifeAdvisorApp/LifeAdvisorApp.xcodeproj \
             -scheme LifeAdvisorApp \
             -destination 'platform=iOS Simulator,name=iPhone 17'
+
+      - name: Enforce 80% coverage on changed production files
+        if: github.event_name == 'pull_request'
+        run: |
+          python3 scripts/check_changed_files_coverage.py \
+            --result-bundle build/TestResults.xcresult \
+            --threshold 80 \
+            --base-sha "${{ github.event.pull_request.base.sha }}" \
+            --head-sha "${{ github.event.pull_request.head.sha }}"

@@ -24,6 +24,8 @@ Thanks for your interest in contributing.
 - describe what changed and why
 - mention manual or automated testing performed
 - avoid unrelated formatting or cleanup changes
+- expect PR checks to run in GitHub Actions
+- expect changed production Swift files in PRs to meet the coverage gate configured in CI
 
 ## Issue reports
 

@@ -1,0 +1,80 @@
+/* Rules table - English (base/fallback language) */
+
+/* Category names */
+"macronutrient_balance" = "Macronutrient Balance";
+"restrictions" = "Restrictions";
+"food_quality" = "Food Quality";
+"eating_pattern" = "Eating Pattern";
+
+/* Section titles for grouped display */
+"section_macros" = "Macronutrient Balance";
+"section_restrictions" = "Restrictions";
+"section_quality_pattern" = "Food Quality & Eating Pattern";
+
+/* Rule titles */
+"who_protein" = "Protein";
+"who_total_fat" = "Total Fat";
+"who_saturated_fat" = "Saturated Fat";
+"who_trans_fat" = "Trans Fat";
+"who_pufa" = "PUFA";
+"who_carbs" = "Carbohydrates";
+"who_free_sugar" = "Added Sugar";
+"who_sodium" = "Sodium";
+"who_energy_balance" = "Energy Balance";
+"who_fiber" = "Fiber";
+"who_fruits_vegetables" = "Fruits & Vegetables";
+"who_whole_grain" = "Whole Grains";
+"who_legumes_nuts" = "Legumes & Nuts";
+"who_red_meat" = "Red Meat";
+"who_processed_meat" = "Processed Meat";
+"who_meal_regularity" = "Meal Regularity";
+
+/* Rule descriptions */
+"who_protein_desc" = "10–15% of daily calories";
+"who_total_fat_desc" = "15–30% of daily calories";
+"who_saturated_fat_desc" = "No more than 10% of daily calories";
+"who_trans_fat_desc" = "No more than 1% of daily calories";
+"who_pufa_desc" = "6–10% of daily calories";
+"who_carbs_desc" = "45–75% of daily calories";
+"who_free_sugar_desc" = "No more than 10% of daily calories";
+"who_sodium_desc" = "No more than 2000 mg per day";
+"who_energy_balance_desc" = "Daily intake within 15% of target";
+"who_fiber_desc" = "At least 25 g per day";
+"who_fruits_vegetables_desc" = "At least 400 g per day";
+"who_whole_grain_desc" = "Whole grain products present in the day";
+"who_legumes_nuts_desc" = "Legumes or nuts present in the day";
+"who_red_meat_desc" = "No more than 500 g per week";
+"who_processed_meat_desc" = "Avoid processed meat products";
+"who_meal_regularity_desc" = "No more than 3 skipped meals per week";
+
+/* Violation reason descriptions */
+"exceeds_upper" = "%@: %@ at norm %@";
+"approaching_upper" = "%@: %@ approaching %@";
+"below_lower" = "%@: %@ at norm %@";
+"approaching_lower" = "%@: %@ approaching %@";
+"category_missing" = "%@: category missing in daily diet";
+"unwanted_category_present" = "%@: unwanted category present";
+
+/* Rule detail format */
+"rule_value_format" = "%@ of %@";
+
+/* Food category names for violations */
+"category_whole_grain" = "whole grains";
+"category_legume_or_nut" = "legumes / nuts / seeds";
+"category_processed_meat" = "processed meat";
+"category_legume" = "legumes";
+"category_nut_seed" = "nuts / seeds";
+"category_fruit" = "fruit";
+"category_vegetable" = "vegetables";
+"category_red_meat" = "red meat";
+
+/* Violation zone labels */
+"zone_normal" = "Normal";
+"zone_warning" = "Warning";
+"zone_violation" = "Violation";
+"zone_no_data" = "No data";
+
+/* Skip-related */
+"skips_format" = "%d skipped";
+"excessive_skips" = "Too many skips: %d this week";
+"some_skips" = "Some meals skipped: %d this week";

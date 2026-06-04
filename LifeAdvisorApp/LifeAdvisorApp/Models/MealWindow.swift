@@ -3,7 +3,8 @@ import SwiftData
 
 @Model
 final class MealWindow {
-    @Attribute(.unique) var name: String
+    @Attribute(.unique) var windowId: String
+    var name: String
     var startHour: Int
     var startMinute: Int
     var endHour: Int
@@ -11,6 +12,7 @@ final class MealWindow {
     var order: Int
 
     init(
+        windowId: String,
         name: String,
         startHour: Int,
         startMinute: Int,
@@ -18,6 +20,7 @@ final class MealWindow {
         endMinute: Int,
         order: Int
     ) {
+        self.windowId = windowId
         self.name = name
         self.startHour = startHour
         self.startMinute = startMinute
@@ -36,5 +39,23 @@ final class MealWindow {
 
     func endDateComponents() -> DateComponents {
         DateComponents(hour: endHour, minute: endMinute)
+    }
+
+    static let defaultWindowIds = ["breakfast", "lunch", "dinner"]
+
+    var isSystemDefault: Bool {
+        Self.defaultWindowIds.contains(windowId)
+    }
+
+    func localizedName(language: AppLanguage = AppLanguageManager.currentEffectiveLanguage) -> String {
+        guard isSystemDefault else { return name }
+        let key: String
+        switch windowId {
+        case "breakfast": key = "breakfast_name"
+        case "lunch": key = "lunch_name"
+        case "dinner": key = "dinner_name"
+        default: return name
+        }
+        return LocalizationHelper.localized(key, table: "Localizable", language: language)
     }
 }

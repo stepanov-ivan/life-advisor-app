@@ -7,9 +7,17 @@ struct RuleDefinition: Codable, Identifiable {
     let params: RuleParams
     let warningRatio: Double
     let category: String
-    let title: String
-    let description: String
+    let title: String?
+    let description: String?
     let window: String
+
+    var displayTitle: String {
+        title ?? id
+    }
+
+    var displayDescription: String {
+        description ?? ""
+    }
 
     var categoryTitle: String {
         switch category {

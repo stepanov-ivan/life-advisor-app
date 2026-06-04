@@ -4,6 +4,7 @@ import SwiftData
 struct RulesListView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var engine = RuleEngine()
+    @StateObject private var languageManager = AppLanguageManager.shared
 
     var body: some View {
         NavigationStack {
@@ -29,13 +30,15 @@ struct RulesListView: View {
 
     private var rulesList: some View {
         let allRules = engine.allRules()
-        let grouped = Dictionary(grouping: allRules) { $0.categoryTitle }
+        let sections = RuleGroupingPolicy(language: languageManager.effectiveLanguage)
+            .sections(for: allRules, surface: .rulesList)
+        let ruleMap = Dictionary(uniqueKeysWithValues: allRules.map { ($0.id, $0) })
 
         return List {
-            ForEach(["Баланс макронутриентов", "Ограничения", "Качество продуктов", "Режим питания"], id: \.self) { category in
-                if let rules = grouped[category] {
-                    Section(category) {
-                        ForEach(rules) { rule in
+            ForEach(sections) { section in
+                Section(section.title) {
+                    ForEach(section.ruleIds, id: \.self) { ruleId in
+                        if let rule = ruleMap[ruleId] {
                             ruleRow(rule)
                         }
                     }
@@ -46,13 +49,14 @@ struct RulesListView: View {
 
     private func ruleRow(_ rule: RuleDefinition) -> some View {
         let enabled = engine.isRuleEnabled(rule.id)
+        let localizer = RulePresentationLocalizer(language: languageManager.effectiveLanguage)
 
         return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(rule.title)
+                Text(localizer.ruleTitle(for: rule.id))
                     .font(.body)
                     .foregroundColor(enabled ? .primary : .secondary)
-                Text(rule.description)
+                Text(localizer.ruleDescription(for: rule.id))
                     .font(.caption)
                     .foregroundColor(.secondary)
             }

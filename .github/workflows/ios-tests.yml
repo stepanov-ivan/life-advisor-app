@@ -26,7 +26,7 @@ jobs:
             -resultBundlePath build/TestResults.xcresult \
             -project LifeAdvisorApp/LifeAdvisorApp.xcodeproj \
             -scheme LifeAdvisorApp \
-            -destination 'platform=iOS Simulator,name=iPhone 17'
+            -destination 'platform=iOS Simulator,name=iPhone 16'
 
       - name: Enforce 80% coverage on changed production files
         if: github.event_name == 'pull_request'

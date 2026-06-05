@@ -19,6 +19,67 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
+      - name: Prepare iOS Simulator
+        id: simulator
+        run: |
+          python3 <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          def run_json(*args):
+              result = subprocess.run(args, check=True, capture_output=True, text=True)
+              return json.loads(result.stdout)
+
+          runtimes = run_json("xcrun", "simctl", "list", "runtimes", "available", "-j")["runtimes"]
+          ios_runtime = next((runtime for runtime in runtimes if runtime.get("platform") == "iOS"), None)
+          if ios_runtime is None:
+              print("No available iOS simulator runtime found", file=sys.stderr)
+              sys.exit(1)
+
+          device_types = run_json("xcrun", "simctl", "list", "devicetypes", "-j")["devicetypes"]
+          preferred_names = ["iPhone 16", "iPhone 16 Pro", "iPhone 15", "iPhone 15 Pro"]
+          iphone_types = [device for device in device_types if device["name"].startswith("iPhone")]
+          device_type = next((device for name in preferred_names for device in iphone_types if device["name"] == name), None)
+          if device_type is None and iphone_types:
+              device_type = iphone_types[0]
+          if device_type is None:
+              print("No iPhone simulator device type found", file=sys.stderr)
+              sys.exit(1)
+
+          simulator_name = f"CI {device_type['name']}"
+          subprocess.run(
+              [
+                  "xcrun", "simctl", "create",
+                  simulator_name,
+                  device_type["identifier"],
+                  ios_runtime["identifier"],
+              ],
+              check=True,
+              capture_output=True,
+              text=True,
+          )
+          created = subprocess.run(
+              ["xcrun", "simctl", "list", "devices", "available", "-j"],
+              check=True,
+              capture_output=True,
+              text=True,
+          )
+          devices = json.loads(created.stdout)["devices"]
+          runtime_devices = devices.get(ios_runtime["identifier"], [])
+          simulator = next((device for device in runtime_devices if device["name"] == simulator_name), None)
+          if simulator is None:
+              print("Created simulator not found", file=sys.stderr)
+              sys.exit(1)
+
+          subprocess.run(["xcrun", "simctl", "boot", simulator["udid"]], check=True)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"simulator_udid={simulator['udid']}\n")
+              handle.write(f"simulator_name={simulator_name}\n")
+          PY
+
       - name: Run tests
         run: |
           xcodebuild test \
@@ -26,7 +87,7 @@ jobs:
             -resultBundlePath build/TestResults.xcresult \
             -project LifeAdvisorApp/LifeAdvisorApp.xcodeproj \
             -scheme LifeAdvisorApp \
-            -destination 'platform=iOS Simulator,name=iPhone 17'
+            -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.simulator_udid }}'
 
       - name: Enforce 80% coverage on changed production files
         if: github.event_name == 'pull_request'
@@ -36,3 +97,7 @@ jobs:
             --threshold 80 \
             --base-sha "${{ github.event.pull_request.base.sha }}" \
             --head-sha "${{ github.event.pull_request.head.sha }}"
+
+      - name: Shutdown iOS Simulator
+        if: always()
+        run: xcrun simctl shutdown "${{ steps.simulator.outputs.simulator_udid }}" || true

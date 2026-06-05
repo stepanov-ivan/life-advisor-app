@@ -4,7 +4,7 @@ struct PromptBuilder {
     let language: AppLanguage
 
     func mealEstimationSystemPrompt() -> String {
-        LocalizationHelper.localized("meal_estimation_system", table: "Prompts", language: language)
+        LocalizationHelper.localized("meal_estimation_system", table: "Prompts", language: language) + "\n\n" + languageDirective
     }
 
     func mealEstimationJSONSchema() -> String {
@@ -44,6 +44,18 @@ struct PromptBuilder {
         return schema
     }
 
+    private var languageDirective: String {
+        switch language {
+        case .en: return "IMPORTANT: Respond only in English, even if the meal description or user text is in another language. All free-text fields, including reason and assumptions, must be in English."
+        case .ru: return "ВАЖНО: Отвечай только на русском языке, даже если описание еды или текст пользователя на другом языке. Все текстовые поля, включая reason и assumptions, должны быть на русском."
+        case .system:
+            return Locale.current.language.languageCode?.identifier == "ru"
+                ? "ВАЖНО: Отвечай только на русском языке, даже если описание еды или текст пользователя на другом языке. Все текстовые поля, включая reason и assumptions, должны быть на русском."
+                : "IMPORTANT: Respond only in English, even if the meal description or user text is in another language. All free-text fields, including reason and assumptions, must be in English."
+        }
+    }
+
+
     func dailyAdviceUserMessage(
         goalCalories: Double,
         meals: [(window: String, calories: Double, proteins: Double, fats: Double, carbs: Double)],
@@ -63,11 +75,11 @@ struct PromptBuilder {
         let mealsText = meals.map {
             "\($0.window): \(Int($0.calories)) kcal (P:\(Int($0.proteins)) F:\(Int($0.fats)) C:\(Int($0.carbs)))"
         }.joined(separator: "\n")
-        return String(format: template, mealsText, "\(Int(totalCal))", "\(Int(totalProtein))", "\(Int(totalFat))", "\(Int(totalCarbs))")
+        return String(format: template, mealsText, "\(Int(totalCal))", "\(Int(totalProtein))", "\(Int(totalFat))", "\(Int(totalCarbs))") + "\n\n" + languageDirective
     }
 
     func dailyAdviceSystemPrompt() -> String {
-        LocalizationHelper.localized("daily_advice_system", table: "Prompts", language: language)
+        LocalizationHelper.localized("daily_advice_system", table: "Prompts", language: language) + "\n\n" + languageDirective
     }
 
     func recommendationUserMessage(
@@ -79,7 +91,7 @@ struct PromptBuilder {
         let eatenText = eaten.map {
             "\($0.window): \(Int($0.calories)) kcal (P:\(Int($0.proteins)) F:\(Int($0.fats)) C:\(Int($0.carbs)))"
         }.joined(separator: "\n")
-        return String(format: template, eatenText, remainingWindows.joined(separator: ", "))
+        return String(format: template, eatenText, remainingWindows.joined(separator: ", ")) + "\n\n" + languageDirective
     }
 
     func localizedLLMError(_ error: LLMError) -> String {

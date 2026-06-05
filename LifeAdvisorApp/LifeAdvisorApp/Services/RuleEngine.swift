@@ -899,15 +899,20 @@ final class RuleEngine {
         guard let field else {
             return MetricFormat(unit: "", multiply: 1, decimals: 0)
         }
+
+        let language = AppLanguageManager.currentEffectiveLanguage
+        let gramsUnit = language == .ru ? " г" : " g"
+        let milligramsUnit = language == .ru ? " мг" : " mg"
+
         switch field {
         case "fatPercent", "proteinPercent", "carbsPercent",
              "saturatedFatPercent", "transFatPercent", "sugarPercent",
              "energyBalancePercent", "pufaPercent":
             return MetricFormat(unit: "%", multiply: 100, decimals: 1)
         case "sodiumMg":
-            return MetricFormat(unit: " мг", multiply: 1, decimals: 0)
+            return MetricFormat(unit: milligramsUnit, multiply: 1, decimals: 0)
         case "fiberGrams", "fruitVegGrams", "redMeatGrams":
-            return MetricFormat(unit: " г", multiply: 1, decimals: 0)
+            return MetricFormat(unit: gramsUnit, multiply: 1, decimals: 0)
         default:
             return MetricFormat(unit: "", multiply: 1, decimals: 0)
         }

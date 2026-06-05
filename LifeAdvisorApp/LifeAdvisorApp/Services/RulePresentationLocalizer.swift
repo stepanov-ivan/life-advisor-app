@@ -55,7 +55,7 @@ struct RulePresentationLocalizer {
     func localizedDescription(for violation: RuleViolation, engine: RuleEngine) -> String {
         let mapper = RulePresentationMapper(engine: engine)
         guard let case_ = mapper.map(violation: violation) else {
-            return violation.reasonCode
+            return LocalizationHelper.localized(violation.reasonCode, table: "Rules", language: language)
         }
         return localizedDescription(for: case_)
     }

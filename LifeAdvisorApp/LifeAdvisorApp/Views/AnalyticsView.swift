@@ -229,18 +229,18 @@ struct AnalyticsView: View {
                         let pctF = fatsSum * 9 / caloriesSum * 100
                         let pctC = carbsSum * 4 / caloriesSum * 100
 
-                        barSegment(value: pctP, color: .blue, label: "Б \(Int(proteinsSum))г")
-                        barSegment(value: pctF, color: .yellow, label: "Ж \(Int(fatsSum))г")
-                        barSegment(value: pctC, color: .green, label: "У \(Int(carbsSum))г")
+                        barSegment(value: pctP, color: .blue, label: String(format: LocalizationHelper.localized("macro_short_protein_format", table: "Localizable", language: languageManager.effectiveLanguage), Int(proteinsSum)))
+                        barSegment(value: pctF, color: .yellow, label: String(format: LocalizationHelper.localized("macro_short_fat_format", table: "Localizable", language: languageManager.effectiveLanguage), Int(fatsSum)))
+                        barSegment(value: pctC, color: .green, label: String(format: LocalizationHelper.localized("macro_short_carb_format", table: "Localizable", language: languageManager.effectiveLanguage), Int(carbsSum)))
                     }
                 }
                 .frame(height: 20)
                 .clipShape(RoundedRectangle(cornerRadius: 4))
 
                 HStack(spacing: 16) {
-                    legendDot(color: .blue, text: "Белки \(Int(proteinsSum))г")
-                    legendDot(color: .yellow, text: "Жиры \(Int(fatsSum))г")
-                    legendDot(color: .green, text: "Углеводы \(Int(carbsSum))г")
+                    legendDot(color: .blue, text: String(format: LocalizationHelper.localized("macro_protein_format", table: "Localizable", language: languageManager.effectiveLanguage), Int(proteinsSum)))
+                    legendDot(color: .yellow, text: String(format: LocalizationHelper.localized("macro_fat_format", table: "Localizable", language: languageManager.effectiveLanguage), Int(fatsSum)))
+                    legendDot(color: .green, text: String(format: LocalizationHelper.localized("macro_carb_format", table: "Localizable", language: languageManager.effectiveLanguage), Int(carbsSum)))
                 }
                 .font(.caption)
             }
@@ -416,22 +416,24 @@ struct BJUDetailView: View {
     let fatsSum: Double
     let carbsSum: Double
 
+    private var language: AppLanguage { AppLanguageManager.currentEffectiveLanguage }
+
     var body: some View {
         VStack {
             Chart(groupedData, id: \.date) { item in
                 BarMark(
                     x: .value("Дата", item.date, unit: .day),
-                    y: .value("Белки", item.proteins)
+                    y: .value(LocalizationHelper.localized("Белки", table: "Localizable", language: language), item.proteins)
                 )
                 .foregroundStyle(Color.blue)
                 BarMark(
                     x: .value("Дата", item.date, unit: .day),
-                    y: .value("Жиры", item.fats)
+                    y: .value(LocalizationHelper.localized("Жиры", table: "Localizable", language: language), item.fats)
                 )
                 .foregroundStyle(Color.yellow)
                 BarMark(
                     x: .value("Дата", item.date, unit: .day),
-                    y: .value("Углеводы", item.carbs)
+                    y: .value(LocalizationHelper.localized("Углеводы", table: "Localizable", language: language), item.carbs)
                 )
                 .foregroundStyle(Color.green)
             }

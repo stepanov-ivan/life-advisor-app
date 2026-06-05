@@ -159,3 +159,12 @@
 "Белки (г)" = "Protein (g)";
 "Жиры (г)" = "Fat (g)";
 "Углеводы (г)" = "Carbs (g)";
+
+"meal_macros_format" = "P: %dg F: %dg C: %dg";
+"product_contribution_format" = "%@: %d%% of daily intake";
+"macro_short_protein_format" = "P %dg";
+"macro_short_fat_format" = "F %dg";
+"macro_short_carb_format" = "C %dg";
+"macro_protein_format" = "Protein %dg";
+"macro_fat_format" = "Fat %dg";
+"macro_carb_format" = "Carbs %dg";

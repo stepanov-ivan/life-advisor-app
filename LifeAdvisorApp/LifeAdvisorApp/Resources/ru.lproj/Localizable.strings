@@ -162,3 +162,12 @@
 "Белки (г)" = "Белки (г)";
 "Жиры (г)" = "Жиры (г)";
 "Углеводы (г)" = "Углеводы (г)";
+
+"meal_macros_format" = "Б: %dг Ж: %dг У: %dг";
+"product_contribution_format" = "%@: %d%% дневного рациона";
+"macro_short_protein_format" = "Б %dг";
+"macro_short_fat_format" = "Ж %dг";
+"macro_short_carb_format" = "У %dг";
+"macro_protein_format" = "Белки %dг";
+"macro_fat_format" = "Жиры %dг";
+"macro_carb_format" = "Углеводы %dг";

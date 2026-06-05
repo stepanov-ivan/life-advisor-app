@@ -55,6 +55,7 @@ struct PromptBuilder {
         }
     }
 
+
     func dailyAdviceUserMessage(
         goalCalories: Double,
         meals: [(window: String, calories: Double, proteins: Double, fats: Double, carbs: Double)],

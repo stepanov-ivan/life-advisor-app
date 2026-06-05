@@ -76,7 +76,7 @@ struct MealSlotCard: View {
                 case .structured:
                     VStack(alignment: .leading, spacing: 4) {
                         Text("\(Int(event.calories)) ккал").font(.title3.bold())
-                        Text("Б: \(Int(event.proteins))г Ж: \(Int(event.fats))г У: \(Int(event.carbs))г")
+                        Text(String(format: LocalizationHelper.localized("meal_macros_format", table: "Localizable", language: languageManager.effectiveLanguage), Int(event.proteins), Int(event.fats), Int(event.carbs)))
                             .font(.caption)
                             .foregroundColor(.secondary)
 
@@ -95,7 +95,7 @@ struct MealSlotCard: View {
                                                 Circle()
                                                     .fill(pv.zone == "violation" ? Color.red : Color.yellow)
                                                     .frame(width: 5, height: 5)
-                                                Text("\(pv.ruleTitle) — \(Int(pv.percent))% дневного")
+                                                Text(String(format: LocalizationHelper.localized("product_contribution_format", table: "Localizable", language: languageManager.effectiveLanguage), pv.ruleTitle, Int(pv.percent)))
                                                     .font(.caption2)
                                                     .foregroundColor(.secondary)
                                             }

@@ -543,6 +543,13 @@ struct DashboardView: View {
 }
 
 struct MealEventEditorView: View {
+    private enum EditorDialog: String, Identifiable {
+        case outOfSyncDecision
+        case clearStructure
+
+        var id: String { rawValue }
+    }
+
     private struct ItemDraft: Identifiable {
         let id: PersistentIdentifier
         let item: EstimateItem
@@ -557,6 +564,7 @@ struct MealEventEditorView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @StateObject private var languageManager = AppLanguageManager.shared
+    @State private var ruleEngine = RuleEngine()
 
     let event: MealEvent
     let violations: [RuleViolation]
@@ -565,8 +573,8 @@ struct MealEventEditorView: View {
     @State private var isSubmitting = false
     @State private var errorText = ""
     @State private var itemDrafts: [ItemDraft] = []
-    @State private var pendingOutOfSyncDecision = false
-    @State private var showClearStructureConfirmation = false
+    @State private var activeDialog: EditorDialog?
+    @FocusState private var editorFieldFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -574,6 +582,7 @@ struct MealEventEditorView: View {
                 Section("Текст") {
                     TextField("Что съели?", text: $textDraft, axis: .vertical)
                         .lineLimit(3...8)
+                        .focused($editorFieldFocused)
                 }
 
                 if event.outOfSync {
@@ -638,6 +647,7 @@ struct MealEventEditorView: View {
                                     TextField("0", text: $draft.grams)
                                         .keyboardType(.decimalPad)
                                         .frame(width: 44)
+                                        .focused($editorFieldFocused)
                                         .onChange(of: draft.grams) { _, _ in
                                             unlockDraft(draft.id)
                                             recalculateMacrosIfNeeded(for: draft.id)
@@ -646,40 +656,51 @@ struct MealEventEditorView: View {
                                         .keyboardType(.decimalPad)
                                         .frame(width: 40)
                                         .multilineTextAlignment(.leading)
+                                        .focused($editorFieldFocused)
                                         .onChange(of: draft.calories) { _, _ in markDraftLocked(draft.id) }
                                     TextField("Б", text: $draft.proteins)
                                         .keyboardType(.decimalPad)
                                         .frame(width: 30)
                                         .multilineTextAlignment(.leading)
+                                        .focused($editorFieldFocused)
                                         .onChange(of: draft.proteins) { _, _ in markDraftLocked(draft.id) }
                                     TextField("Ж", text: $draft.fats)
                                         .keyboardType(.decimalPad)
                                         .frame(width: 30)
                                         .multilineTextAlignment(.leading)
+                                        .focused($editorFieldFocused)
                                         .onChange(of: draft.fats) { _, _ in markDraftLocked(draft.id) }
                                     TextField("У", text: $draft.carbs)
                                         .keyboardType(.decimalPad)
                                         .frame(width: 30)
                                         .multilineTextAlignment(.leading)
+                                        .focused($editorFieldFocused)
                                         .onChange(of: draft.carbs) { _, _ in markDraftLocked(draft.id) }
                                 }
                             }
                         }
 
-                        Button("Очистить состав", role: .destructive) {
-                            showClearStructureConfirmation = true
+                        Button(role: .destructive) {
+                            editorFieldFocused = false
+                            activeDialog = .clearStructure
+                        } label: {
+                            Text("Очистить состав")
+                                .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.borderless)
                     }
                 }
 
                 Section {
-                    Button(isSubmitting ? "Отправка..." : "Пересчитать по тексту") {
+                    Button {
+                        editorFieldFocused = false
                         if requiresOutOfSyncDecision {
-                            pendingOutOfSyncDecision = true
+                            activeDialog = .outOfSyncDecision
                         } else {
                             reestimate()
                         }
+                    } label: {
+                        Text(isSubmitting ? "Отправка..." : "Пересчитать по тексту")
+                            .frame(maxWidth: .infinity)
                     }
                     .disabled(isSubmitting || textDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
@@ -687,6 +708,7 @@ struct MealEventEditorView: View {
             .navigationTitle(event.windowLabel)
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
+                ruleEngine.configure(context: modelContext)
                 textDraft = event.rawText ?? ""
                 itemDrafts = event.estimateItems
                     .sorted { $0.estimatedCalories > $1.estimatedCalories }
@@ -711,22 +733,49 @@ struct MealEventEditorView: View {
                     }
                 }
             }
-            .confirmationDialog("Текст и структура расходятся", isPresented: $pendingOutOfSyncDecision) {
-                Button("Пересчитать по тексту") {
-                    reestimate()
+            .confirmationDialog(
+                activeDialog == .outOfSyncDecision
+                    ? "Текст и структура расходятся"
+                    : "Очистить все позиции структуры?",
+                isPresented: Binding(
+                    get: { activeDialog != nil },
+                    set: { if !$0 { activeDialog = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                switch activeDialog {
+                case .outOfSyncDecision:
+                    Button("Пересчитать по тексту") {
+                        activeDialog = nil
+                        reestimate()
+                    }
+                    Button("Оставить структуру") {
+                        activeDialog = nil
+                        keepStructureAsSourceOfTruth()
+                    }
+                    Button("Отмена", role: .cancel) {
+                        activeDialog = nil
+                    }
+                case .clearStructure:
+                    Button("Очистить", role: .destructive) {
+                        activeDialog = nil
+                        clearStructureAndSetPending()
+                    }
+                    Button("Отмена", role: .cancel) {
+                        activeDialog = nil
+                    }
+                case .none:
+                    EmptyView()
                 }
-                Button("Оставить структуру") {
-                    keepStructureAsSourceOfTruth()
-                }
-                Button("Отмена", role: .cancel) { }
             } message: {
-                Text("По умолчанию лучше переоценить. Можно оставить текущую структуру и сохранить текст как заметку.")
-            }
-            .confirmationDialog("Очистить все позиции структуры?", isPresented: $showClearStructureConfirmation) {
-                Button("Очистить", role: .destructive) {
-                    clearStructureAndSetPending()
+                switch activeDialog {
+                case .outOfSyncDecision:
+                    Text("По умолчанию лучше переоценить. Можно оставить текущую структуру и сохранить текст как заметку.")
+                case .clearStructure:
+                    EmptyView()
+                case .none:
+                    EmptyView()
                 }
-                Button("Отмена", role: .cancel) { }
             }
         }
     }
@@ -734,9 +783,6 @@ struct MealEventEditorView: View {
     private func reestimate() {
         let text = MemoryEngine.normalizeForSync(textDraft)
         guard text.count >= 3 else { return }
-        if let baseline = event.baselineTextNormalized, baseline == text {
-            return
-        }
 
         isSubmitting = true
         errorText = ""
@@ -781,6 +827,8 @@ struct MealEventEditorView: View {
                     event.rawPayloadCreatedAt = Date()
                     event.parseErrorSummary = nil
                     try? modelContext.save()
+                    ruleEngine.resetWeekIfNeeded()
+                    ruleEngine.generateViolations(for: event.timestamp)
                     isSubmitting = false
                     dismiss()
                 }
@@ -838,6 +886,8 @@ struct MealEventEditorView: View {
             context: modelContext
         )
         try? modelContext.save()
+        ruleEngine.resetWeekIfNeeded()
+        ruleEngine.generateViolations(for: event.timestamp)
     }
 
     private var areItemDraftsValid: Bool {
@@ -862,6 +912,8 @@ struct MealEventEditorView: View {
         event.userNote = MemoryEngine.normalizeForSync(textDraft)
         event.outOfSync = MemoryEngine.isOutOfSync(selectedText: event.baselineTextNormalized, currentText: textDraft)
         try? modelContext.save()
+        ruleEngine.resetWeekIfNeeded()
+        ruleEngine.generateViolations(for: event.timestamp)
         dismiss()
     }
 
@@ -911,6 +963,8 @@ struct MealEventEditorView: View {
             modelContext.delete(oldItem)
         }
         try? modelContext.save()
+        ruleEngine.resetWeekIfNeeded()
+        ruleEngine.generateViolations(for: event.timestamp)
     }
 
     private static func format(_ value: Double) -> String {

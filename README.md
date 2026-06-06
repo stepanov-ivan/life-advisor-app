@@ -6,6 +6,10 @@ It combines deterministic nutrition rules with LLM-assisted meal parsing so user
 
 ## Screenshots and demo
 
+Current dashboard screenshot with inline rule contribution breakdown:
+
+![Life Advisor dashboard with rule contribution breakdown](docs/images/dashboard-rule-contributions.png)
+
 Screenshots and a short demo are planned for the first public release.
 
 Recommended showcase assets for grant and repository review:
@@ -16,7 +20,7 @@ Recommended showcase assets for grant and repository review:
 - rules view with explainable WHO-aligned checks
 - short demo video of meal logging to rule feedback
 
-The current UI is primarily Russian-first. English localization is planned so the project can be reviewed more easily by non-Russian-speaking contributors and grant reviewers.
+The app includes English and Russian localization so the product can be reviewed more easily by contributors, users, and grant reviewers.
 
 ## Why this project matters
 

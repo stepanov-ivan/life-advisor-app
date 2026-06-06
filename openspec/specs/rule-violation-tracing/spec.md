@@ -1,64 +1,56 @@
 ## Purpose
 
-Трейсинг нарушений правил питания от правила через день и приём до конкретного ингредиента с хранением в SwiftData.
+Трейсинг нарушений правил питания от правила через день и приём до конкретного ингредиента через persisted contribution entities (RuleContributionSnapshot, RuleContributionItem). Explainability отделён от факта нарушения.
 
 ## Requirements
 
 ### Requirement: Модель нарушения правила
-Система SHALL хранить каждое нарушение правила в SwiftData-сущности `RuleViolation` с полями: `ruleId`, `date`, `zone`, `magnitude`, `reasonCode`, `contributionJSON` (опционально), и связями `@Relationship` на `MealEvent?` и `EstimateItem?`.
+Система SHALL хранить нарушение правила в `RuleViolation` как факт нарушения с полями `ruleId`, `date`, `zone`, `magnitude`, `reasonCode` и опциональными связями на `MealEvent?` и `EstimateItem?`, но SHALL NOT использовать нарушение как универсальную explainability-модель для всех зон правила.
 
-#### Scenario: Создание нарушения с вкладом
-- **WHEN** правило оценивается, значение выходит за пределы нормы, и контрибьюшн-анализ находит продукты с вкладом >30%
-- **THEN** создаётся `RuleViolation` с зоной, величиной отклонения, `contributionJSON` с топ-3 продуктами, и ссылками на приём и ингредиент
+#### Scenario: Создание нарушения при выходе за норму
+- **WHEN** дневное правило оценивается и значение выходит за пределы нормы
+- **THEN** создаётся `RuleViolation` с зоной `violation`, величиной отклонения и связью с днём
 
-#### Scenario: Создание нарушения без вклада
-- **WHEN** правило оценивается и значение выходит за пределы нормы, но контрибьюшн-анализ не находит продуктов с вкладом >30%
-- **THEN** создаётся `RuleViolation` с `contributionJSON = nil`, зоной и величиной отклонения
+#### Scenario: Правило в норме
+- **WHEN** дневное правило оценивается и значение остаётся в допустимых границах
+- **THEN** `RuleViolation` не создаётся, а explainability хранится только в `RuleContributionSnapshot`
 
-#### Scenario: Нарушение без привязки к ингредиенту
-- **WHEN** нарушение относится ко дню в целом (например, пропуск приёма)
-- **THEN** `mealEvent` и `estimateItem` могут быть `nil`, `contributionJSON = nil`
+#### Scenario: Нарушение дня без привязки к продукту
+- **WHEN** нарушение относится ко дню в целом и не имеет конкретного culprit-продукта
+- **THEN** `mealEvent` и `estimateItem` могут быть `nil`
 
-#### Scenario: Каскадное удаление
-- **WHEN** `MealEvent` удаляется из базы
-- **THEN** связанные `RuleViolation` удаляются автоматически через `@Relationship` delete cascade
+### Requirement: `RuleViolation` не хранит contribution JSON
+Система SHALL NOT хранить карту вклада продуктов внутри `RuleViolation`. Источником truth для дневного product contribution SHALL быть `RuleContributionSnapshot` и `RuleContributionItem`.
 
-### Requirement: Карта вклада продуктов в нарушение
-Система SHALL хранить в `RuleViolation` JSON-строку `contributionJSON` с картой вклада продуктов в метрику правила: `[{ "itemId": "...", "name": "...", "percent": 45.7 }]`. Поле может быть `nil` для нарушений без привязки к конкретным продуктам (например, пропуск приёма).
-
-#### Scenario: Нарушение с контрибьюшн-картой
-- **WHEN** правило `saturated_fat` нарушено за день, а продукт «Сливочное масло» даёт 52% насыщенных жиров
-- **THEN** `RuleViolation.contributionJSON` содержит запись с `itemId`, `name: "Сливочное масло"`, `percent: 52.0`
+#### Scenario: Нарушение с продуктами-вкладчиками
+- **WHEN** нарушение связано с продуктами, внёсшими вклад в метрику
+- **THEN** эти связи читаются через contribution items, а не через JSON-строку внутри `RuleViolation`
 
 #### Scenario: Нарушение без продуктов
-- **WHEN** правило `meal_regularity` нарушено из-за пропуска приёмов
-- **THEN** `RuleViolation.contributionJSON = nil`
+- **WHEN** у нарушения нет конкретного продуктового источника
+- **THEN** violation хранится без contribution payload и UI не пытается читать JSON
 
-### Requirement: Нарушения доступны из контекста приёма
-Система SHALL предоставлять список `RuleViolation`, связанных с конкретным `MealEvent`, через метод `RuleEngine.violationsForMeal(_:)`. Метод анализирует `contributionJSON` всех нарушений за день: если любой `itemId` из JSON принадлежит `meal.estimateItems` — нарушение включается в результат. Если `contributionJSON` отсутствует или пуст, но `violation.mealEvent == meal` — нарушение также включается (обратная совместимость для правил без контрибьюшн-анализа).
+### Requirement: Нарушения доступны из контекста приёма через contribution entities
+Система SHALL предоставлять список нарушений, связанных с конкретным `MealEvent`, через contribution items, связанные одновременно с нарушенным правилом, днём и данным `MealEvent`.
 
-#### Scenario: Запрос нарушений для приёма — найдено через contributionJSON
-- **WHEN** `contributionJSON` нарушения `saturated_fat` содержит `itemId` продукта из приёма
-- **THEN** `violationsForMeal` возвращает это нарушение
-
-#### Scenario: Запрос нарушений для приёма — прямое совпадение mealEvent
-- **WHEN** нарушение `meal_regularity` имеет `contributionJSON = nil`, но `mealEvent` ссылается на данный приём
-- **THEN** `violationsForMeal` возвращает это нарушение
+#### Scenario: Запрос нарушений для приёма
+- **WHEN** у нарушенного правила есть contribution items, связанные с продуктами данного приёма
+- **THEN** `violationsForMeal(_:)` возвращает это нарушение
 
 #### Scenario: Приём без нарушений
-- **WHEN** ни одно нарушение дня не ссылается на продукты данного приёма ни через `contributionJSON`, ни через `mealEvent`
-- **THEN** `violationsForMeal` возвращает пустой массив
+- **WHEN** ни одно нарушенное правило не имеет contribution items для данного `MealEvent`
+- **THEN** `violationsForMeal(_:)` возвращает пустой массив
 
-### Requirement: Трейсинг цепочки нарушения
-Система SHALL предоставлять drill-down от правила через день и приём до конкретного ингредиента с указанием structured presentation case, причины и величины отклонения. Пользовательское описание нарушения SHALL строиться вне доменного слоя и локализоваться на активном языке приложения.
+### Requirement: Трейсинг explainability отделён от факта нарушения
+Система SHALL использовать `RuleContributionSnapshot` и `RuleContributionItem` как дневной explainability read model для breakdown правила и списка затронутых правил под продуктом, независимо от того, находится правило в зоне `normal` или `violation`.
 
-#### Scenario: Раскрытие нарушения до ингредиента на английском языке
-- **WHEN** effective language приложения английский и пользователь открывает нарушение правила на экране детали правила
-- **THEN** система строит drill-down через stable rule ids и reason codes, а пользовательский explanation text отображается на английском языке через presentation layer
+#### Scenario: Breakdown правила в норме
+- **WHEN** правило находится в зоне `normal`
+- **THEN** UI читает product contribution из snapshot/items без создания `RuleViolation`
 
-#### Scenario: Нарушение дня без конкретного ингредиента
-- **WHEN** нарушение не привязано к конкретному ингредиенту
-- **THEN** drill-down останавливается на уровне приёма или дня, а explanation text всё равно формируется через локализованный presentation layer
+#### Scenario: Breakdown нарушенного правила
+- **WHEN** правило находится в зоне `violation`
+- **THEN** UI может одновременно использовать `RuleViolation` как факт нарушения и snapshot/items как explainability-слой
 
 ### Requirement: Хранение нарушений в пределах недели
 Система SHALL хранить `RuleViolation` только в пределах текущей недели (пн–вс).

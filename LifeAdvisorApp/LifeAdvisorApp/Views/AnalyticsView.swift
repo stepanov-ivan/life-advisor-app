@@ -107,7 +107,7 @@ struct AnalyticsView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Picker("Период", selection: $selectedPeriod) {
+                Picker(LocalizationHelper.localized("Период", table: "Localizable", language: languageManager.effectiveLanguage), selection: $selectedPeriod) {
                     ForEach(AnalyticsPeriod.allCases, id: \.self) { period in
                         Text(period.title).tag(period)
                     }
@@ -129,7 +129,7 @@ struct AnalyticsView: View {
                     }
                 }
             }
-            .navigationTitle("Аналитика")
+            .navigationTitle(LocalizationHelper.localized("Аналитика", table: "Localizable", language: languageManager.effectiveLanguage))
         }
     }
 
@@ -138,7 +138,7 @@ struct AnalyticsView: View {
             Image(systemName: "chart.bar.xaxis")
                 .font(.system(size: 48))
                 .foregroundColor(.secondary)
-            Text("Нет данных за выбранный период")
+            Text(LocalizationHelper.localized("Нет данных за выбранный период", table: "Localizable", language: languageManager.effectiveLanguage))
                 .foregroundColor(.secondary)
         }
         .frame(maxHeight: .infinity)
@@ -148,15 +148,15 @@ struct AnalyticsView: View {
     private var caloriesCard: some View {
         NavigationLink {
             CalorieDetailView(
-                title: "Калории",
+                title: LocalizationHelper.localized("Калории", table: "Localizable", language: languageManager.effectiveLanguage),
                 groupedData: groupedByDay,
                 goal: goalCalories,
-                unit: "ккал"
+                unit: LocalizationHelper.localized("ккал", table: "Localizable", language: languageManager.effectiveLanguage)
             )
         } label: {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text("Калории")
+                    Text(LocalizationHelper.localized("Калории", table: "Localizable", language: languageManager.effectiveLanguage))
                         .font(.headline)
                         .foregroundColor(.primary)
                     Spacer()
@@ -168,11 +168,11 @@ struct AnalyticsView: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text("\(Int(caloriesSum))")
                         .font(.title.bold())
-                    Text("ккал")
+                    Text(LocalizationHelper.localized("ккал", table: "Localizable", language: languageManager.effectiveLanguage))
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                     Spacer()
-                    Text("Цель: \(Int(goalCalories * Double(max(1, groupedByDay.count))))")
+                    Text(String(format: LocalizationHelper.localized("Цель: %d", table: "Localizable", language: languageManager.effectiveLanguage), Int(goalCalories * Double(max(1, groupedByDay.count)))))
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -254,14 +254,14 @@ struct AnalyticsView: View {
     @ViewBuilder
     private var deficitCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Дефицит")
+            Text(LocalizationHelper.localized("Дефицит", table: "Localizable", language: languageManager.effectiveLanguage))
                 .font(.headline)
 
             HStack(alignment: .firstTextBaseline) {
                 Text(deficit >= 0 ? "−\(Int(deficit))" : "+\(Int(-deficit))")
                     .font(.title.bold())
                     .foregroundColor(deficitColor)
-                Text("ккал")
+                Text(LocalizationHelper.localized("ккал", table: "Localizable", language: languageManager.effectiveLanguage))
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                 Spacer()

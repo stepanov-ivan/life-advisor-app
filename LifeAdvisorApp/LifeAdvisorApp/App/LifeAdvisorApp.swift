@@ -23,7 +23,9 @@ struct LifeAdvisorApp: App {
             MealWindow.self,
             Recommendation.self,
             NutritionRuleConfig.self,
-            RuleViolation.self
+            RuleViolation.self,
+            RuleContributionSnapshot.self,
+            RuleContributionItem.self
         ])
 
         let configuration = ModelConfiguration(

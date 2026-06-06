@@ -66,7 +66,7 @@ struct SettingsView: View {
                     HStack {
                         VStack(alignment: .leading) {
                             Text(suggestion.displayText)
-                            Text("\(Int(suggestion.calories)) ккал")
+                            Text("\(Int(suggestion.calories)) \(LocalizationHelper.localized("ккал", table: "Localizable", language: languageManager.effectiveLanguage))")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                         }
@@ -169,7 +169,7 @@ struct SettingsView: View {
                         .keyboardType(.numberPad)
                         .multilineTextAlignment(.trailing)
                         .frame(width: 80)
-                    Text("ккал")
+                    Text(LocalizationHelper.localized("ккал", table: "Localizable", language: languageManager.effectiveLanguage))
                 }
             } else {
                 Button("Пересчитать через калькулятор") {

@@ -29,14 +29,6 @@ struct RulePresentationLocalizer {
             let title = ruleTitle(for: ruleId)
             let template = LocalizationHelper.localized("below_lower", table: "Rules", language: language)
             return String(format: template, title, valueFormatted, thresholdFormatted)
-        case let .approachingUpper(ruleId, valueFormatted, thresholdFormatted):
-            let title = ruleTitle(for: ruleId)
-            let template = LocalizationHelper.localized("approaching_upper", table: "Rules", language: language)
-            return String(format: template, title, valueFormatted, thresholdFormatted)
-        case let .approachingLower(ruleId, valueFormatted, thresholdFormatted):
-            let title = ruleTitle(for: ruleId)
-            let template = LocalizationHelper.localized("approaching_lower", table: "Rules", language: language)
-            return String(format: template, title, valueFormatted, thresholdFormatted)
         case let .categoryMissing(categoryId):
             let title = categoryName(for: "category_\(categoryId)")
             let template = LocalizationHelper.localized("category_missing", table: "Rules", language: language)
@@ -47,8 +39,6 @@ struct RulePresentationLocalizer {
             return String(format: template, title)
         case let .excessiveSkips(count):
             return String(format: LocalizationHelper.localized("excessive_skips", table: "Rules", language: language), count)
-        case let .someSkips(count):
-            return String(format: LocalizationHelper.localized("some_skips", table: "Rules", language: language), count)
         }
     }
 

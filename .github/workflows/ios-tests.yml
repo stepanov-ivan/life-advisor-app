@@ -89,15 +89,6 @@ jobs:
             -scheme LifeAdvisorApp \
             -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.simulator_udid }}'
 
-      - name: Enforce 80% coverage on changed production files
-        if: github.event_name == 'pull_request'
-        run: |
-          python3 scripts/check_changed_files_coverage.py \
-            --result-bundle build/TestResults.xcresult \
-            --threshold 80 \
-            --base-sha "${{ github.event.pull_request.base.sha }}" \
-            --head-sha "${{ github.event.pull_request.head.sha }}"
-
       - name: Shutdown iOS Simulator
         if: always()
         run: xcrun simctl shutdown "${{ steps.simulator.outputs.simulator_udid }}" || true

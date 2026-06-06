@@ -52,6 +52,42 @@ Body summary:
 
 Reduce friction when users want to correct grams, calories, or meal composition after an LLM estimate.
 
+### Rework weak advice into grounded daily guidance
+
+Labels:
+
+- `help wanted`
+- `enhancement`
+- `llm`
+
+Body summary:
+
+Replace the current low-value advice block with short, actionable guidance grounded in actual daily rules, meals, and explainable contributors.
+
+### Add a read-only assistant chat over meals and rules
+
+Labels:
+
+- `enhancement`
+- `llm`
+- `ux`
+
+Body summary:
+
+Introduce an assistant chat that can explain rule outcomes, summarize trends, and answer grounded questions about meals and nutrition data without changing app state.
+
+### Add tool-based assistant actions
+
+Labels:
+
+- `enhancement`
+- `llm`
+- `architecture`
+
+Body summary:
+
+Evolve the assistant from read-only guidance toward tool-based actions such as correcting meals, saving preferences, or creating reminders through structured app APIs.
+
 ## Roadmap issue
 
 ### Public OSS baseline for `v0.1.0`

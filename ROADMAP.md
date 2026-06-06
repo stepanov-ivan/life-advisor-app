@@ -4,29 +4,28 @@ This roadmap reflects the current public direction of Life Advisor as an open-so
 
 ## Near-term
 
-### `v0.1.0` Public open-source baseline
+### `v0.1.x` Stabilization after first public release
 
-- polish repository presentation for public contributors
-- keep tests green in CI
-- publish first release notes
-- add screenshots or a short demo
+- keep tests green in CI after public release
+- tighten regression coverage around meal editing and rule recomputation
+- continue simplifying explainability UX where rule feedback is still confusing
 - improve onboarding clarity for first-time users
-- prepare English-localization groundwork for public-facing review
+- collect early contributor and reviewer feedback from the public release
 
 ### Explainability and trust
 
-- improve violation descriptions and rule rationale
-- make manual correction of meal estimates easier
-- surface confidence and uncertainty more clearly
-- strengthen malformed-response handling in LLM flows
+- continue improving rule rationale and contribution breakdown clarity
+- refine manual correction and re-estimation flows based on real usage
+- surface confidence and uncertainty more clearly in estimation flows
+- strengthen malformed-response handling and recovery UX in LLM flows
 
 ## Mid-term
 
 ### Localization
 
-- add full English localization
-- preserve Russian as a first-class supported language
-- audit all user-facing strings for locale coverage
+- keep English and Russian as first-class supported languages
+- continue auditing all user-facing strings for locale coverage
+- improve localization coverage in edge-case editor, analytics, and settings flows
 
 ### Nutrition intelligence
 
@@ -37,7 +36,7 @@ This roadmap reflects the current public direction of Life Advisor as an open-so
 ### Contributor experience
 
 - add more contributor-friendly issues
-- improve docs for app setup and testing
+- improve docs for app setup, testing, and release workflow
 - publish a clearer release cadence
 
 ## Longer-term

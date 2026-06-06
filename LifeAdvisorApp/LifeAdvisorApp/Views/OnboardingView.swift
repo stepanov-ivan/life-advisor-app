@@ -90,7 +90,7 @@ struct OnboardingView: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 100)
                         .multilineTextAlignment(.center)
-                    Text("ккал/день")
+                    Text("\(LocalizationHelper.localized("ккал", table: "Localizable", language: languageManager.effectiveLanguage))/\(languageManager.effectiveLanguage == .ru ? "день" : "day")")
                 }
             } else {
                 OnboardingCalculatorView { result in
@@ -153,6 +153,7 @@ struct WindowRow: View {
 }
 
 struct OnboardingCalculatorView: View {
+    @StateObject private var languageManager = AppLanguageManager.shared
     @State private var gender = "male"
     @State private var age = "30"
     @State private var height = "180"
@@ -204,7 +205,10 @@ struct OnboardingCalculatorView: View {
             .buttonStyle(.bordered)
 
             if let result = result {
-                Text("Рекомендуемая норма: \(Int(result)) ккал/день")
+                Text(String(
+                    format: LocalizationHelper.localized("Рекомендуемая норма: %d ккал/день", table: "Localizable", language: languageManager.effectiveLanguage),
+                    Int(result)
+                ))
                     .font(.headline)
                     .foregroundColor(.green)
             }

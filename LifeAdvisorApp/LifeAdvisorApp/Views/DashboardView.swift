@@ -88,7 +88,6 @@ struct DashboardView: View {
                                 windowLabel: window.localizedName(language: languageManager.effectiveLanguage),
                                 timeRange: "\(window.startTimeString)–\(window.endTimeString)",
                                 event: event,
-                                violations: event.flatMap { ruleEngine.violationsForMeal($0) } ?? [],
                                 engine: ruleEngine,
                                 onTap: {
                                     if let event {
@@ -557,6 +556,7 @@ struct MealEventEditorView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @StateObject private var languageManager = AppLanguageManager.shared
 
     let event: MealEvent
     let violations: [RuleViolation]
@@ -621,7 +621,7 @@ struct MealEventEditorView: View {
                                 Text("Продукт")
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                 Text("г").frame(width: 44, alignment: .leading)
-                                Text("Ккал").frame(width: 40, alignment: .leading)
+                                Text(LocalizationHelper.localized("Ккал", table: "Localizable", language: languageManager.effectiveLanguage)).frame(width: 40, alignment: .leading)
                                 Text("Б").frame(width: 30, alignment: .leading)
                                 Text("Ж").frame(width: 30, alignment: .leading)
                                 Text("У").frame(width: 30, alignment: .leading)
@@ -642,7 +642,7 @@ struct MealEventEditorView: View {
                                             unlockDraft(draft.id)
                                             recalculateMacrosIfNeeded(for: draft.id)
                                         }
-                                    TextField("ккал", text: $draft.calories)
+                                    TextField(LocalizationHelper.localized("ккал", table: "Localizable", language: languageManager.effectiveLanguage), text: $draft.calories)
                                         .keyboardType(.decimalPad)
                                         .frame(width: 40)
                                         .multilineTextAlignment(.leading)
@@ -934,6 +934,7 @@ struct LogSheetView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @StateObject private var languageManager = AppLanguageManager.shared
 
     let windowLabel: String
     let initialText: String
@@ -994,7 +995,7 @@ struct LogSheetView: View {
                             .background(Color.blue.opacity(0.15))
                             .foregroundColor(.blue)
                             .clipShape(Capsule())
-                        Text("\(Int(selectedSuggestion.calories)) ккал")
+                        Text("\(Int(selectedSuggestion.calories)) \(LocalizationHelper.localized("ккал", table: "Localizable", language: languageManager.effectiveLanguage))")
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Spacer()

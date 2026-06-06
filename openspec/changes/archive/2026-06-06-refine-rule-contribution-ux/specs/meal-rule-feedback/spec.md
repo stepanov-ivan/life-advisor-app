@@ -1,8 +1,4 @@
-## Purpose
-
-Инлайн-подсветка нарушений правил питания в карточке приёма пищи: связь нарушения с приёмом через contributionJSON, контрибьюшн-анализ продукта, визуальная индикация зон.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Связь нарушения с приёмом через contribution entities
 Система SHALL определять, относится ли нарушение к конкретному `MealEvent`, через связанные `RuleContributionItem`, а не через `contributionJSON`. Нарушение относится к приёму, если существует contribution item того же дня, связанный с данным `MealEvent` и относящийся к нарушенному правилу.

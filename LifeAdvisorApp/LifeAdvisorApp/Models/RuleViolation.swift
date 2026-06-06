@@ -8,8 +8,6 @@ final class RuleViolation {
     var zone: String
     var magnitude: Double
     var reasonCode: String
-    var contributionJSON: String?
-
     @Relationship var mealEvent: MealEvent?
     @Relationship var estimateItem: EstimateItem?
 
@@ -19,7 +17,6 @@ final class RuleViolation {
         zone: String,
         magnitude: Double = 0,
         reasonCode: String = "",
-        contributionJSON: String? = nil,
         mealEvent: MealEvent? = nil,
         estimateItem: EstimateItem? = nil
     ) {
@@ -28,7 +25,6 @@ final class RuleViolation {
         self.zone = zone
         self.magnitude = magnitude
         self.reasonCode = reasonCode
-        self.contributionJSON = contributionJSON
         self.mealEvent = mealEvent
         self.estimateItem = estimateItem
     }

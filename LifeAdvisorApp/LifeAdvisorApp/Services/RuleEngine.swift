@@ -88,6 +88,10 @@ final class RuleEngine {
 
     func allRules() -> [RuleDefinition] { rules }
 
+    func setRulesForTesting(_ rules: [RuleDefinition]) {
+        self.rules = rules
+    }
+
     func enabledRules() -> [RuleDefinition] {
         guard let context = modelContext else { return rules }
         let configs = (try? context.fetch(FetchDescriptor<NutritionRuleConfig>())) ?? []
@@ -232,7 +236,7 @@ final class RuleEngine {
         }
 
         let value = computeField(field, items: validItems, context: context, days: windowDays)
-        return evaluateRange(value: value, lower: rule.params.lower, upper: rule.params.upper, warningRatio: rule.warningRatio)
+        return evaluateRange(value: value, lower: rule.params.lower, upper: rule.params.upper)
     }
 
     private func evaluatePresenceRule(_ rule: RuleDefinition, for date: Date, context: ModelContext) -> EvaluationResult {
@@ -267,7 +271,6 @@ final class RuleEngine {
             return .noData
         }
 
-        let warningThreshold = Int(rule.params.warningThreshold ?? 1)
         let violationThreshold = Int(rule.params.violationThreshold ?? 4)
 
         var skippedCount = 0
@@ -285,7 +288,7 @@ final class RuleEngine {
             }
         }
 
-        return evaluateCountSkipped(skippedCount: skippedCount, warningThreshold: warningThreshold, violationThreshold: violationThreshold)
+        return evaluateCountSkipped(skippedCount: Int(skippedCount), violationThreshold: violationThreshold)
     }
 
     // MARK: - Field computation
@@ -409,27 +412,27 @@ final class RuleEngine {
         let dayStart = cal.startOfDay(for: meal.timestamp)
         guard let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) else { return [] }
 
-        let descriptor = FetchDescriptor<RuleViolation>(
+        let violationDescriptor = FetchDescriptor<RuleViolation>(
             predicate: #Predicate { $0.date >= dayStart && $0.date < dayEnd }
         )
-        let dayViolations = (try? context.fetch(descriptor)) ?? []
+        let dayViolations = (try? context.fetch(violationDescriptor)) ?? []
 
-        let mealItemIds = Set(meal.estimateItems.map { $0.persistentModelID.storeIdentifier ?? "" })
+        let itemDescriptor = FetchDescriptor<RuleContributionItem>()
+        let allItems = (try? context.fetch(itemDescriptor)) ?? []
+        let mealItemIds = Set(meal.estimateItems.map { $0.persistentModelID })
+
+        let violatedRuleIds = Set(
+            allItems
+                .filter { item in
+                    guard let ei = item.estimateItem else { return false }
+                    return mealItemIds.contains(ei.persistentModelID)
+                }
+                .map { $0.ruleId }
+        )
 
         return dayViolations.filter { violation in
-            // Check contributionJSON for matching itemIds
-            if let json = violation.contributionJSON,
-               let data = json.data(using: .utf8),
-               let entries = try? JSONDecoder().decode([ContributionEntry].self, from: data) {
-                let contributionItemIds = Set(entries.map { $0.itemId })
-                if !contributionItemIds.isDisjoint(with: mealItemIds) {
-                    return true
-                }
-            }
-            // Fallback: direct mealEvent match
-            if violation.mealEvent?.persistentModelID == meal.persistentModelID {
-                return true
-            }
+            if violatedRuleIds.contains(violation.ruleId) { return true }
+            if violation.mealEvent?.persistentModelID == meal.persistentModelID { return true }
             return false
         }
     }
@@ -452,22 +455,31 @@ final class RuleEngine {
         let de = dayRange.end
 
         // Remove old violations for this day
-        let oldDescriptor = FetchDescriptor<RuleViolation>(
+        let oldViolationDescriptor = FetchDescriptor<RuleViolation>(
             predicate: #Predicate { $0.date >= ds && $0.date < de }
         )
-        if let oldViolations = try? context.fetch(oldDescriptor) {
+        if let oldViolations = try? context.fetch(oldViolationDescriptor) {
             for v in oldViolations { context.delete(v) }
+        }
+
+        // Remove old snapshots for this day
+        let oldSnapshotDescriptor = FetchDescriptor<RuleContributionSnapshot>(
+            predicate: #Predicate { $0.date >= ds && $0.date < de }
+        )
+        if let oldSnapshots = try? context.fetch(oldSnapshotDescriptor) {
+            for s in oldSnapshots { context.delete(s) }
         }
 
         // Evaluate all enabled rules for this day
         for rule in enabledRules() {
             let result = evaluateRule(rule, for: date)
-            if result.zone == .warning || result.zone == .violation {
-                // Compute contribution map
-                let contributions = contributionMap(for: rule, date: date)
-                let contribJSON = encodeContributionJSON(contributions)
 
-                // Find the culprit meal/event/item
+            // Generate snapshots for supported day rules regardless of zone
+            if rule.window == "day" && ["range", "presence"].contains(rule.type) && result.zone != .noData {
+                generateSnapshot(for: rule, date: date, result: result, context: context)
+            }
+
+            if result.zone == .violation {
                 let events = eventsForDay(date, context: context)
                 let culpritEvent = findCulpritEvent(rule: rule, events: events, context: context)
 
@@ -477,7 +489,6 @@ final class RuleEngine {
                     zone: result.zone.rawValue,
                     magnitude: result.magnitude,
                     reasonCode: result.reasonCode,
-                    contributionJSON: contribJSON,
                     mealEvent: culpritEvent.meal,
                     estimateItem: culpritEvent.item
                 )
@@ -536,28 +547,38 @@ final class RuleEngine {
         return (try? context.fetch(descriptor)) ?? []
     }
 
-    // MARK: - Contribution analysis
+    // MARK: - Snapshot generation
 
-    struct ContributionEntry: Codable {
-        let itemId: String
-        let name: String
-        let percent: Double
+    private func generateSnapshot(for rule: RuleDefinition, date: Date, result: EvaluationResult, context: ModelContext) {
+        let metric = formattedMetric(for: rule, date: date)
+
+        let snapshot = RuleContributionSnapshot(
+            ruleId: rule.id,
+            date: date,
+            zone: result.zone.rawValue,
+            valueFormatted: metric.valueFormatted,
+            thresholdFormatted: metric.thresholdFormatted,
+            unit: metric.unit,
+            field: rule.field
+        )
+        context.insert(snapshot)
+
+        let items = generateContributionItems(for: rule, date: date, snapshot: snapshot, context: context)
+        snapshot.items = items
     }
 
-    func contributionMap(for rule: RuleDefinition, date: Date) -> [ContributionEntry] {
-        guard let context = modelContext else { return [] }
-
+    private func generateContributionItems(for rule: RuleDefinition, date: Date, snapshot: RuleContributionSnapshot, context: ModelContext) -> [RuleContributionItem] {
         switch rule.type {
         case "range":
-            return contributionForRangeRule(rule, date: date, context: context)
+            return contributionItemsForRangeRule(rule, date: date, snapshot: snapshot, context: context)
         case "presence":
-            return contributionForPresenceRule(rule, date: date, context: context)
+            return contributionItemsForPresenceRule(rule, date: date, snapshot: snapshot, context: context)
         default:
             return []
         }
     }
 
-    private func contributionForRangeRule(_ rule: RuleDefinition, date: Date, context: ModelContext) -> [ContributionEntry] {
+    private func contributionItemsForRangeRule(_ rule: RuleDefinition, date: Date, snapshot: RuleContributionSnapshot, context: ModelContext) -> [RuleContributionItem] {
         guard let field = rule.field else { return [] }
         let windowDays = rule.window == "week" ? weekDayRange(for: date) : [date]
         let items = fetchItems(for: windowDays, context: context)
@@ -568,138 +589,39 @@ final class RuleEngine {
 
         guard !items.isEmpty else { return [] }
 
-        // Для percent-полей продукт сам должен быть значимым источником нутриента
-        let percentFields: Set<String> = ["fatPercent", "saturatedFatPercent", "transFatPercent", "proteinPercent", "carbsPercent", "sugarPercent"]
-        let significantItems: Set<ObjectIdentifier>? = {
-            guard percentFields.contains(field), let upper = rule.params.upper else { return nil }
-            let sig = items.filter { item in
-                let itemValue = itemValueForField(field, item: item)
-                let result = evaluateRange(value: itemValue, lower: nil, upper: upper, warningRatio: rule.warningRatio)
-                return result.zone != .normal
-            }
-            return Set(sig.map { ObjectIdentifier($0) })
-        }()
+        let dayTotal = computeField(field, items: items, context: context, days: windowDays)
+        let totals = aggregateTotals(items: items, days: windowDays, context: context)
 
-        let entries: [ContributionEntry]
-        switch field {
-        case "fatPercent", "saturatedFatPercent", "transFatPercent":
-            let totalNutrient = items.reduce(0) { $0 + $1.estimatedFats }
-            guard totalNutrient > 0 else { return [] }
-            entries = items.compactMap { item in
-                guard significantItems?.contains(ObjectIdentifier(item)) ?? true else { return nil }
-                return ContributionEntry(
-                    itemId: item.persistentModelID.storeIdentifier ?? "",
-                    name: item.name,
-                    percent: (item.estimatedFats / totalNutrient) * 100
-                )
+        let indexedItems = items.enumerated().map { (index, item) in (index, item) }
+        let result: [RuleContributionItem] = indexedItems.compactMap { (index, item) in
+            let absolute = itemAbsoluteContribution(field: field, item: item, dayTotals: totals)
+            guard absolute > 0 else { return nil }
+            let shareBase = contributionShareBase(for: field, dayTotals: totals, dayTotal: dayTotal)
+            let percent = shareBase > 0 ? (absolute / shareBase) * 100 : 0
+
+            let item = RuleContributionItem(
+                ruleId: rule.id,
+                productName: item.name,
+                absoluteContribution: absolute,
+                percentContribution: percent,
+                dayOrderIndex: index,
+                snapshot: snapshot,
+                mealEvent: item.mealEvent,
+                estimateItem: item
+            )
+            return item
+        }
+        .sorted {
+            if $0.absoluteContribution == $1.absoluteContribution {
+                return $0.dayOrderIndex < $1.dayOrderIndex
             }
-        case "proteinPercent":
-            let totalNutrient = items.reduce(0) { $0 + $1.estimatedProteins }
-            guard totalNutrient > 0 else { return [] }
-            entries = items.compactMap { item in
-                guard significantItems?.contains(ObjectIdentifier(item)) ?? true else { return nil }
-                return ContributionEntry(
-                    itemId: item.persistentModelID.storeIdentifier ?? "",
-                    name: item.name,
-                    percent: (item.estimatedProteins / totalNutrient) * 100
-                )
-            }
-        case "carbsPercent":
-            let totalNutrient = items.reduce(0) { $0 + $1.estimatedCarbs }
-            guard totalNutrient > 0 else { return [] }
-            entries = items.compactMap { item in
-                guard significantItems?.contains(ObjectIdentifier(item)) ?? true else { return nil }
-                return ContributionEntry(
-                    itemId: item.persistentModelID.storeIdentifier ?? "",
-                    name: item.name,
-                    percent: (item.estimatedCarbs / totalNutrient) * 100
-                )
-            }
-        case "sugarPercent":
-            let totalNutrient = items.reduce(0) { $0 + $1.estimatedSugar }
-            guard totalNutrient > 0 else { return [] }
-            entries = items.compactMap { item in
-                guard significantItems?.contains(ObjectIdentifier(item)) ?? true else { return nil }
-                return ContributionEntry(
-                    itemId: item.persistentModelID.storeIdentifier ?? "",
-                    name: item.name,
-                    percent: (item.estimatedSugar / totalNutrient) * 100
-                )
-            }
-        case "sodiumMg":
-            let totalValue = items.reduce(0) { $0 + $1.estimatedSodium }
-            guard totalValue > 0 else { return [] }
-            entries = items.map { item in
-                ContributionEntry(
-                    itemId: item.persistentModelID.storeIdentifier ?? "",
-                    name: item.name,
-                    percent: (item.estimatedSodium / totalValue) * 100
-                )
-            }
-        case "fiberGrams":
-            let totalValue = items.reduce(0) { $0 + $1.estimatedFiber }
-            guard totalValue > 0 else { return [] }
-            entries = items.map { item in
-                ContributionEntry(
-                    itemId: item.persistentModelID.storeIdentifier ?? "",
-                    name: item.name,
-                    percent: (item.estimatedFiber / totalValue) * 100
-                )
-            }
-        case "fruitVegGrams":
-            let totalValue = items
-                .filter { $0.foodCategory == "fruit" || $0.foodCategory == "vegetable" }
-                .reduce(0) { $0 + $1.grams }
-            guard totalValue > 0 else { return [] }
-            entries = items
-                .filter { $0.foodCategory == "fruit" || $0.foodCategory == "vegetable" }
-                .map { item in
-                    ContributionEntry(
-                        itemId: item.persistentModelID.storeIdentifier ?? "",
-                        name: item.name,
-                        percent: (item.grams / totalValue) * 100
-                    )
-                }
-        case "redMeatGrams":
-            let totalValue = items
-                .filter { $0.foodCategory == "red_meat" }
-                .reduce(0) { $0 + $1.grams }
-            guard totalValue > 0 else { return [] }
-            entries = items
-                .filter { $0.foodCategory == "red_meat" }
-                .map { item in
-                    ContributionEntry(
-                        itemId: item.persistentModelID.storeIdentifier ?? "",
-                        name: item.name,
-                        percent: (item.grams / totalValue) * 100
-                    )
-                }
-        case "energyBalancePercent":
-            let totalCalories = items.reduce(0) { $0 + $1.estimatedCalories }
-            guard totalCalories > 0 else { return [] }
-            entries = items.map { item in
-                ContributionEntry(
-                    itemId: item.persistentModelID.storeIdentifier ?? "",
-                    name: item.name,
-                    percent: (item.estimatedCalories / totalCalories) * 100
-                )
-            }
-        default:
-            return []
+            return $0.absoluteContribution > $1.absoluteContribution
         }
 
-        return entries
-            .filter { $0.percent > 33 }
-            .sorted { $0.percent > $1.percent }
-            .prefix(3)
-            .map { $0 }
+        return result
     }
 
-    private func contributionForPresenceRule(_ rule: RuleDefinition, date: Date, context: ModelContext) -> [ContributionEntry] {
-        // category_missing: не подсвечиваем продукты — это нарушение дня, а не продукта
-        let inverse = rule.params.inverse ?? false
-        guard inverse else { return [] }
-
+    private func contributionItemsForPresenceRule(_ rule: RuleDefinition, date: Date, snapshot: RuleContributionSnapshot, context: ModelContext) -> [RuleContributionItem] {
         guard let category = rule.params.category else { return [] }
         let items = fetchItems(for: [date], context: context)
             .filter { item in
@@ -708,26 +630,132 @@ final class RuleEngine {
             }
 
         let targetCategories = category == "legume_or_nut" ? ["legume", "nut_seed"] : [category]
+        let matchingItems = items.filter { item in
+            guard let fc = item.foodCategory else { return false }
+            return targetCategories.contains(fc)
+        }
+        let totalGrams = matchingItems.reduce(0) { $0 + $1.grams }
+        let indexed = matchingItems.enumerated().map { (index, item) in (index, item) }
 
-        return items.compactMap { item in
-            let match = targetCategories.contains(item.foodCategory ?? "")
-            guard match else { return nil }
-            return ContributionEntry(
-                itemId: item.persistentModelID.storeIdentifier ?? "",
-                name: item.name,
-                percent: 100
+        return indexed.map { (index, item) in
+            RuleContributionItem(
+                ruleId: rule.id,
+                productName: item.name,
+                absoluteContribution: item.grams,
+                percentContribution: totalGrams > 0 ? (item.grams / totalGrams) * 100 : 0,
+                dayOrderIndex: index,
+                snapshot: snapshot,
+                mealEvent: item.mealEvent,
+                estimateItem: item
             )
         }
-        .sorted { $0.percent > $1.percent }
-        .prefix(3)
-        .map { $0 }
+        .sorted {
+            if $0.absoluteContribution == $1.absoluteContribution {
+                return $0.dayOrderIndex < $1.dayOrderIndex
+            }
+            return $0.absoluteContribution > $1.absoluteContribution
+        }
     }
 
-    private func encodeContributionJSON(_ entries: [ContributionEntry]) -> String? {
-        guard !entries.isEmpty else { return nil }
-        guard let data = try? JSONEncoder().encode(entries),
-              let json = String(data: data, encoding: .utf8) else { return nil }
-        return json
+    private func itemAbsoluteContribution(field: String, item: EstimateItem, dayTotals: DayTotals) -> Double {
+        switch field {
+        case "fatPercent", "transFatPercent":
+            guard dayTotals.calories > 0 else { return 0 }
+            return (item.estimatedFats * 9) / dayTotals.calories
+        case "saturatedFatPercent":
+            guard dayTotals.calories > 0 else { return 0 }
+            return (item.estimatedSaturatedFats * 9) / dayTotals.calories
+        case "proteinPercent":
+            guard dayTotals.calories > 0 else { return 0 }
+            return (item.estimatedProteins * 4) / dayTotals.calories
+        case "carbsPercent":
+            guard dayTotals.calories > 0 else { return 0 }
+            return (item.estimatedCarbs * 4) / dayTotals.calories
+        case "sugarPercent":
+            guard dayTotals.calories > 0 else { return 0 }
+            return (item.estimatedSugar * 4) / dayTotals.calories
+        case "sodiumMg":
+            return item.estimatedSodium
+        case "fiberGrams":
+            return item.estimatedFiber
+        case "fruitVegGrams":
+            return item.foodCategory == "fruit" || item.foodCategory == "vegetable" ? item.grams : 0
+        case "redMeatGrams":
+            return item.foodCategory == "red_meat" ? item.grams : 0
+        case "energyBalancePercent":
+            let target = UserDefaults.standard.double(forKey: "daily_calorie_target")
+            guard target > 0 else { return 0 }
+            return item.estimatedCalories / target
+        default:
+            return 0
+        }
+    }
+
+    private func contributionShareBase(for field: String, dayTotals: DayTotals, dayTotal: Double) -> Double {
+        switch field {
+        case "fatPercent", "saturatedFatPercent", "transFatPercent",
+             "proteinPercent", "carbsPercent", "sugarPercent",
+             "pufaPercent":
+            return dayTotal
+        case "energyBalancePercent":
+            let target = UserDefaults.standard.double(forKey: "daily_calorie_target")
+            guard target > 0 else { return 0 }
+            return dayTotals.calories / target
+        default:
+            return dayTotal
+        }
+    }
+
+    // MARK: - Snapshot queries
+
+    func snapshotsForDay(_ date: Date) -> [RuleContributionSnapshot] {
+        guard let context = modelContext else { return [] }
+        let range = DashboardDateLogic.dayRange(for: date)
+        let start = range.start
+        let end = range.end
+        let descriptor = FetchDescriptor<RuleContributionSnapshot>(
+            predicate: #Predicate { $0.date >= start && $0.date < end }
+        )
+        return (try? context.fetch(descriptor)) ?? []
+    }
+
+    func contributionItemsForEstimateItem(_ item: EstimateItem) -> [RuleContributionItem] {
+        guard let context = modelContext else { return [] }
+        let descriptor = FetchDescriptor<RuleContributionItem>()
+        let allItems = (try? context.fetch(descriptor)) ?? []
+        return allItems.filter { $0.estimateItem?.persistentModelID == item.persistentModelID }
+    }
+
+    /// Returns violated rules for a product where its contribution exceeds the 20% threshold, sorted by contribution descending.
+    func significantViolationsForItem(_ item: EstimateItem, date: Date) -> [RuleContributionItem] {
+        guard let context = modelContext else { return [] }
+        let dayRange = DashboardDateLogic.dayRange(for: date)
+        let ds = dayRange.start
+        let de = dayRange.end
+
+        let violationDescriptor = FetchDescriptor<RuleViolation>(
+            predicate: #Predicate { $0.date >= ds && $0.date < de }
+        )
+        let eligibleViolationRuleIds = Set(
+            ((try? context.fetch(violationDescriptor)) ?? [])
+                .filter { isCulpritHighlightEligible(reasonCode: $0.reasonCode) }
+                .map { $0.ruleId }
+        )
+
+        return contributionItemsForEstimateItem(item)
+            .filter { $0.percentContribution > 20 && eligibleViolationRuleIds.contains($0.ruleId) }
+            .sorted { $0.percentContribution > $1.percentContribution }
+    }
+
+    private func isCulpritHighlightEligible(reasonCode: String) -> Bool {
+        switch reasonCode {
+        case "exceeds_upper", "unwanted_category_present":
+            return true
+        case "below_lower", "category_missing", "excessive_skips", "no_data", "in_range", "regular":
+            return false
+        default:
+            return false
+        }
     }
 
     // MARK: - Culprit tracing
@@ -761,8 +789,8 @@ final class RuleEngine {
         case "range":
             guard let field = rule.field else { return false }
             let value = itemValueForField(field, item: item)
-            let result = evaluateRange(value: value, lower: rule.params.lower, upper: rule.params.upper, warningRatio: rule.warningRatio)
-            return result.zone == .violation || result.zone == .warning
+            let result = evaluateRange(value: value, lower: rule.params.lower, upper: rule.params.upper)
+            return result.zone == .violation
         default:
             return false
         }
@@ -856,7 +884,6 @@ final class RuleEngine {
             let labelKey: String
             switch result.zone {
             case .normal: labelKey = "zone_normal"
-            case .warning: labelKey = "zone_warning"
             case .violation: labelKey = "zone_violation"
             case .noData: labelKey = "zone_no_data"
             }

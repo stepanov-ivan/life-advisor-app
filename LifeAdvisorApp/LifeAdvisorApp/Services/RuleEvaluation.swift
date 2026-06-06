@@ -1,8 +1,7 @@
 import Foundation
 
-enum RuleZone: String, Comparable {
+enum RuleZone: String, Comparable, CaseIterable {
     case normal = "normal"
-    case warning = "warning"
     case violation = "violation"
     case noData = "no_data"
 
@@ -18,8 +17,7 @@ enum RuleZone: String, Comparable {
         switch zone {
         case .normal: return 0
         case .noData: return 1
-        case .warning: return 2
-        case .violation: return 3
+        case .violation: return 2
         }
     }
 }
@@ -41,31 +39,17 @@ struct EvaluationResult {
 func evaluateRange(
     value: Double,
     lower: Double?,
-    upper: Double?,
-    warningRatio: Double
+    upper: Double?
 ) -> EvaluationResult {
     if lower == nil && upper == nil {
         return EvaluationResult(zone: .normal, reasonCode: "no_bounds")
     }
 
-    let ratio = max(0, min(1, warningRatio))
-
-    // Violation checks first
     if let upper = upper, value > upper {
         return EvaluationResult(zone: .violation, magnitude: value - upper, reasonCode: "exceeds_upper")
     }
     if let lower = lower, value < lower {
         return EvaluationResult(zone: .violation, magnitude: lower - value, reasonCode: "below_lower")
-    }
-
-    // Warning checks: value is within [lower, upper] but approaching boundary
-    if ratio < 1 {
-        if let upper = upper, value > upper * ratio {
-            return EvaluationResult(zone: .warning, magnitude: value - upper * ratio, reasonCode: "approaching_upper")
-        }
-        if let lower = lower, value < lower / ratio {
-            return EvaluationResult(zone: .warning, magnitude: lower / ratio - value, reasonCode: "approaching_lower")
-        }
     }
 
     return EvaluationResult(zone: .normal, reasonCode: "in_range")
@@ -98,7 +82,6 @@ func evaluatePresence(
 
 func evaluateCountSkipped(
     skippedCount: Int,
-    warningThreshold: Int,
     violationThreshold: Int
 ) -> EvaluationResult {
     if skippedCount >= violationThreshold {
@@ -106,13 +89,6 @@ func evaluateCountSkipped(
             zone: .violation,
             magnitude: Double(skippedCount),
             reasonCode: "excessive_skips"
-        )
-    }
-    if skippedCount >= warningThreshold {
-        return EvaluationResult(
-            zone: .warning,
-            magnitude: Double(skippedCount),
-            reasonCode: "some_skips"
         )
     }
     return EvaluationResult(zone: .normal, reasonCode: "regular")

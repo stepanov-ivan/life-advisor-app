@@ -1,6 +1,37 @@
 import Foundation
 
 enum LLMClient {
+    struct MealScenarioClassificationResult: Decodable {
+        let scenario: String
+        let dayOffset: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case scenario
+            case dayOffset = "day_offset"
+        }
+    }
+
+    struct MealPlanningStepResult: Decodable {
+        let type: String
+        let dayOffset: Int?
+        let mealSlot: String
+        let title: String?
+        let products: [EstimateItemResult]
+
+        enum CodingKeys: String, CodingKey {
+            case type
+            case dayOffset = "day_offset"
+            case mealSlot = "meal_slot"
+            case title
+            case products
+        }
+    }
+
+    struct MealPlanningResult: Decodable {
+        let scenario: String
+        let steps: [MealPlanningStepResult]
+    }
+
     private struct ChatRequest: Encodable {
         let model: String
         let messages: [Message]
@@ -307,6 +338,152 @@ enum LLMClient {
             remainingWindows: remainingWindows
         )
         return try await chat(userMessage: userMessage, systemPrompt: builder.dailyAdviceSystemPrompt())
+    }
+
+    static func classifyMealScenario(
+        message: String,
+        selectedDate: Date,
+        dayEvents: [MealEvent]
+    ) async throws -> MealScenarioClassification? {
+        let dayContext = dayEvents.map {
+            "\($0.windowLabel): \($0.rawText ?? "") \(Int($0.calories)) kcal"
+        }.joined(separator: "\n")
+
+        let systemPrompt = """
+        Ты классифицируешь запросы про приёмы пищи для iOS приложения.
+        Верни только JSON вида:
+        {
+          "scenario": "meal-create|meal-edit",
+          "day_offset": -1|0|1
+        }
+        Используй:
+        - meal-create, если пользователь описывает новую еду или логирование еды
+        - meal-edit, если пользователь хочет изменить, убрать, исправить или дополнить существующую запись
+        day_offset:
+        - -1 для вчера
+        - 0 для сегодня или текущего выбранного дня
+        - 1 для завтра
+        Не добавляй текст вне JSON.
+        """
+
+        let userMessage = """
+        Selected day: \(DashboardDateLogic.dayKey(for: selectedDate))
+        Existing day context:
+        \(dayContext.isEmpty ? "none" : dayContext)
+
+        User message:
+        \(message)
+        """
+
+        let response = try await chat(userMessage: userMessage, systemPrompt: systemPrompt, jsonMode: true)
+        guard let data = response.data(using: .utf8) else { return nil }
+        let parsed = try JSONDecoder().decode(MealScenarioClassificationResult.self, from: data)
+        guard let scenario = MealScenario(rawValue: parsed.scenario) else { return nil }
+        let day = DashboardDateLogic.startOfDay(
+            Calendar.current.date(byAdding: .day, value: clampedPlannerDayOffset(parsed.dayOffset), to: selectedDate) ?? selectedDate
+        )
+        return MealScenarioClassification(scenario: scenario, resolvedDay: day)
+    }
+
+    static func planMealExecution(
+        message: String,
+        scenario: MealScenario,
+        selectedDate: Date,
+        windows: [MealWindow],
+        dayEvents: [MealEvent]
+    ) async throws -> MealExecutionSession? {
+        let systemPrompt = """
+        Ты — роутер и планировщик meal flow в iOS приложении.
+        Верни JSON с полями:
+        {
+          "scenario": "meal-create|meal-edit",
+          "steps": [{
+            "type": "create|edit",
+            "day_offset": integer,
+            "meal_slot": "breakfast|lunch|dinner",
+            "title": "optional string",
+            "products": [{
+              "name": string,
+              "grams": number,
+              "estimatedCalories": number,
+              "estimatedProteins": number,
+              "estimatedFats": number,
+              "estimatedCarbs": number,
+              "impact_score": number,
+              "reason": string,
+              "high_calorie_flag": bool,
+              "saturated_fats": number|null,
+              "sugar": number|null,
+              "fiber": number|null,
+              "sodium": number|null,
+              "food_category": string|null
+            }]
+          }]
+        }
+        Не добавляй текст вне JSON. Строй только обоснованные шаги.
+        """
+
+        let dayContext = dayEvents.map {
+            "\($0.windowLabel): \($0.rawText ?? "") \(Int($0.calories)) kcal"
+        }.joined(separator: "\n")
+        let windowsContext = windows.map { "\($0.windowId): \($0.localizedName())" }.joined(separator: "\n")
+        let userMessage = """
+        Scenario: \(scenario.rawValue)
+        Selected day: \(DashboardDateLogic.dayKey(for: selectedDate))
+        Windows:
+        \(windowsContext)
+
+        Existing day context:
+        \(dayContext.isEmpty ? "none" : dayContext)
+
+        User message:
+        \(message)
+        """
+
+        let response = try await chat(userMessage: userMessage, systemPrompt: systemPrompt, jsonMode: true)
+        guard let data = response.data(using: .utf8) else { return nil }
+        let parsed = try JSONDecoder().decode(MealPlanningResult.self, from: data)
+        let steps = parsed.steps.compactMap { step -> MealExecutionStep? in
+            guard let type = MealStepType(rawValue: step.type) else { return nil }
+            let day = Calendar.current.date(
+                byAdding: .day,
+                value: clampedPlannerDayOffset(step.dayOffset),
+                to: selectedDate
+            ) ?? selectedDate
+            let title = step.title ?? windows.first(where: { $0.windowId == step.mealSlot })?.localizedName() ?? step.mealSlot
+            let products = step.products.map {
+                MealProductDraft(
+                    name: $0.name,
+                    grams: $0.grams,
+                    estimatedCalories: $0.estimatedCalories,
+                    estimatedProteins: $0.estimatedProteins,
+                    estimatedFats: $0.estimatedFats,
+                    estimatedCarbs: $0.estimatedCarbs,
+                    impactScore: $0.impactScore,
+                    reason: $0.reason,
+                    saturatedFats: $0.saturatedFats ?? 0,
+                    sugar: $0.sugar ?? 0,
+                    fiber: $0.fiber ?? 0,
+                    sodium: $0.sodium ?? 0,
+                    foodCategory: $0.validFoodCategory
+                )
+            }
+            return MealExecutionStep(
+                type: type,
+                day: day,
+                windowId: step.mealSlot,
+                title: title,
+                products: products,
+                sourceText: products.map(\.name).joined(separator: ", "),
+                state: .readyForConfirm
+            )
+        }
+        guard !steps.isEmpty else { return nil }
+        return MealExecutionSession(scenario: scenario, originalMessage: message, steps: steps)
+    }
+
+    static func clampedPlannerDayOffset(_ offset: Int?) -> Int {
+        min(1, max(-1, offset ?? 0))
     }
 }
 

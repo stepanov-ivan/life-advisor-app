@@ -4,6 +4,7 @@ import SwiftData
 struct DashboardView: View {
     @Binding var selectedDate: Date
     @StateObject private var languageManager = AppLanguageManager.shared
+    @EnvironmentObject private var agentSession: AgentSessionStore
 
     struct ManualDraftStructure {
         struct DraftItem {
@@ -44,11 +45,10 @@ struct DashboardView: View {
     @AppStorage("dashboard_last_selected_day") private var lastSelectedDayKey = ""
     @State private var ruleEngine = RuleEngine()
 
-    @State private var selectedWindow: String?
-    @State private var editingEvent: MealEvent?
-    @State private var logText = ""
     @State private var showDatePicker = false
     @State private var showFutureDateHint = false
+    @State private var showCancelExecutionAlert = false
+    @State private var commitFeedback: String?
 
     var activeHypothesis: MemoryHypothesis? {
         MemoryEngine.activeHypothesisPrompt(context: modelContext)
@@ -90,13 +90,8 @@ struct DashboardView: View {
                                 event: event,
                                 engine: ruleEngine,
                                 onTap: {
-                                    if let event {
-                                        editingEvent = event
-                                    } else {
-                                        selectedWindow = window.windowId
-                                        logText = ""
-                                    }
-                                }
+                                },
+                                executionContext: executionContext(for: window)
                             )
                         }
                     }
@@ -117,10 +112,12 @@ struct DashboardView: View {
                 ruleEngine.resetWeekIfNeeded()
                 ruleEngine.generateViolations(for: selectedDate)
             }
-            .onChange(of: notificationManager.pendingLogWindow) { _, value in
+            .onChange(of: agentSession.mealSession?.activeStep?.day) { _, value in
                 guard let value else { return }
-                selectedWindow = value
-                logText = ""
+                applySelectedDate(value)
+            }
+            .onChange(of: notificationManager.pendingLogWindow) { _, value in
+                guard value != nil else { return }
                 notificationManager.pendingLogWindow = nil
             }
             .onChange(of: notificationManager.pendingSkipWindow) { _, value in
@@ -128,14 +125,12 @@ struct DashboardView: View {
                 createSkippedEvent(windowLabel: value)
                 notificationManager.pendingSkipWindow = nil
             }
-            .sheet(item: selectedWindowBinding) { window in
-                LogSheetView(windowLabel: window, initialText: logText) { draft in
-                    saveMealEvent(windowLabel: window, draft: draft)
-                    selectedWindow = nil
+            .sheet(isPresented: chatSheetBinding) {
+                AgentChatInputSheet(isPlanning: agentSession.phase == .planning) { message in
+                    Task {
+                        await startAgentPlanning(message: message)
+                    }
                 }
-            }
-            .sheet(item: $editingEvent) { event in
-                MealEventEditorView(event: event, violations: ruleEngine.violationsForMeal(event))
             }
             .sheet(isPresented: $showDatePicker) {
                 DatePickerSheet(
@@ -152,11 +147,42 @@ struct DashboardView: View {
             .alert("Будущие даты недоступны", isPresented: $showFutureDateHint) {
                 Button("OK", role: .cancel) { }
             }
+            .alert("Несохранённые шаги будут потеряны", isPresented: $showCancelExecutionAlert) {
+                Button("Отменить flow", role: .destructive) {
+                    agentSession.cancel()
+                    agentSession.resetToIdle()
+                }
+                Button("Продолжить", role: .cancel) { }
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 8) {
+                    if let commitFeedback {
+                        Text(commitFeedback)
+                            .font(.caption.bold())
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(Color.green.opacity(0.14), in: Capsule())
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+
+                    if let session = agentSession.mealSession, agentSession.phase == .executing {
+                        MealExecutionBottomBar(session: session) {
+                            showCancelExecutionAlert = true
+                        }
+                    }
+                }
+                .animation(.easeInOut(duration: 0.2), value: commitFeedback)
+            }
         }
     }
 
-    private var selectedWindowBinding: Binding<String?> {
-        .init(get: { selectedWindow }, set: { selectedWindow = $0 })
+    private var chatSheetBinding: Binding<Bool> {
+        .init(
+            get: { agentSession.isChatPresented && agentSession.activeDomain == .meal },
+            set: { isPresented in
+                agentSession.handleChatPresentationChange(isPresented: isPresented)
+            }
+        )
     }
 
     @ViewBuilder
@@ -295,6 +321,249 @@ struct DashboardView: View {
         }
         Task {
             await estimate(event: event, replacingExistingItems: true)
+        }
+    }
+
+    private func planningContext(for message: String) -> MealPlanningContext {
+        _ = message
+        return MealPlanningContext(selectedDate: selectedDate, dayEvents: dayEvents, windows: windows)
+    }
+
+    @MainActor
+    private func startAgentPlanning(message: String) async {
+        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized.count >= 3 else { return }
+        agentSession.beginPlanning()
+        let route = AgentScenarioRouter.route(message: normalized)
+        guard route == .meal else {
+            agentSession.resetToIdle()
+            return
+        }
+
+        let context = planningContext(for: normalized)
+        let classification = await MealScenarioClassifier.classify(normalized, context: context)
+        do {
+            let session = try await MealStepPlanner.plan(
+                message: normalized,
+                classification: classification,
+                context: context
+            )
+            applySelectedDate(session.activeStep?.day ?? selectedDate)
+            agentSession.startMealExecution(session)
+        } catch {
+            agentSession.resetToIdle()
+        }
+    }
+
+    private func executionContext(for window: MealWindow) -> MealSlotExecutionContext? {
+        guard
+            agentSession.phase == .executing,
+            let session = agentSession.mealSession,
+            let activeStep = session.activeStep,
+            DashboardDateLogic.startOfDay(activeStep.day) == DashboardDateLogic.startOfDay(selectedDate),
+            activeStep.windowId == window.windowId
+        else {
+            return nil
+        }
+
+        return MealSlotExecutionContext(
+            stepType: activeStep.type,
+            products: activeStep.products,
+            selectedDayLabel: activeStep.day.formatted(.dateTime.day().month(.abbreviated)),
+            selectedSlotLabel: windows.first(where: { $0.windowId == activeStep.windowId })?.localizedName(language: languageManager.effectiveLanguage) ?? activeStep.windowId,
+            resolveKind: activeStep.resolveKind,
+            onNameChange: { id, value in
+                agentSession.updateMealSession { session in
+                    guard session.steps.indices.contains(session.activeStepIndex) else { return }
+                    guard let productIndex = session.steps[session.activeStepIndex].products.firstIndex(where: { $0.id == id }) else { return }
+                    session.steps[session.activeStepIndex].products[productIndex].name = value
+                }
+            },
+            onGramsChange: { id, value in
+                guard let grams = Double(value) else { return }
+                agentSession.updateMealSession { session in
+                    guard session.steps.indices.contains(session.activeStepIndex) else { return }
+                    guard let productIndex = session.steps[session.activeStepIndex].products.firstIndex(where: { $0.id == id }) else { return }
+                    session.steps[session.activeStepIndex].products[productIndex].updateGrams(grams)
+                }
+            },
+            onRemove: { id in
+                agentSession.updateMealSession { session in
+                    guard session.steps.indices.contains(session.activeStepIndex) else { return }
+                    session.steps[session.activeStepIndex].products.removeAll { $0.id == id }
+                }
+            },
+            onAdd: {
+                agentSession.updateMealSession { session in
+                    guard session.steps.indices.contains(session.activeStepIndex) else { return }
+                    session.steps[session.activeStepIndex].products.append(
+                        MealProductDraft(
+                            name: "",
+                            grams: 100,
+                            estimatedCalories: 120,
+                            estimatedProteins: 5,
+                            estimatedFats: 4,
+                            estimatedCarbs: 15,
+                            reason: "Добавлено вручную"
+                        )
+                    )
+                }
+            },
+            onConfirm: {
+                confirmActiveExecutionStep()
+            },
+            onResolveToEdit: {
+                agentSession.updateMealSession { session in
+                    guard session.steps.indices.contains(session.activeStepIndex) else { return }
+                    session.steps[session.activeStepIndex].type = .edit
+                    MealResolveEngine.applyResolveState(
+                        to: &session.steps[session.activeStepIndex],
+                        existingEvent: latestEvent(
+                            for: session.steps[session.activeStepIndex].windowId,
+                            on: session.steps[session.activeStepIndex].day
+                        )
+                    )
+                }
+            },
+            onResolveToDayOffset: { offset in
+                applyResolveDayOffset(offset)
+            },
+            onResolveToWindow: { windowId in
+                applyResolveWindow(windowId)
+            }
+        )
+    }
+
+    private func applyResolveDayOffset(_ offset: Int) {
+        let baseDay = agentSession.mealSession?.activeStep?.day ?? selectedDate
+        let targetDay = Calendar.current.date(byAdding: .day, value: offset, to: baseDay) ?? baseDay
+        updateActiveStepResolution(day: targetDay, windowId: nil)
+    }
+
+    private func applyResolveWindow(_ windowId: String) {
+        updateActiveStepResolution(day: nil, windowId: windowId)
+    }
+
+    private func updateActiveStepResolution(day: Date?, windowId: String?) {
+        let updatedDay = day.map { DashboardDateLogic.startOfDay($0) }
+        agentSession.updateMealSession { session in
+            guard session.steps.indices.contains(session.activeStepIndex) else { return }
+            if let updatedDay {
+                session.steps[session.activeStepIndex].day = updatedDay
+            }
+            if let windowId {
+                session.steps[session.activeStepIndex].windowId = windowId
+                session.steps[session.activeStepIndex].title = windows.first(where: { $0.windowId == windowId })?.localizedName() ?? windowId
+            }
+            let currentStep = session.steps[session.activeStepIndex]
+            let existingEvent = latestEvent(for: currentStep.windowId, on: currentStep.day)
+            MealResolveEngine.applyResolveState(
+                to: &session.steps[session.activeStepIndex],
+                existingEvent: existingEvent
+            )
+        }
+        if let currentDay = agentSession.mealSession?.activeStep?.day {
+            applySelectedDate(currentDay)
+        }
+    }
+
+    private func confirmActiveExecutionStep() {
+        guard let session = agentSession.mealSession, let step = session.activeStep else { return }
+        let draftProducts = step.products.filter { !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard !draftProducts.isEmpty else { return }
+
+        let currentResolve = MealResolveEngine.resolveKind(
+            for: step,
+            existingEvent: latestEvent(for: step.windowId, on: step.day)
+        )
+        if let currentResolve {
+            agentSession.updateMealSession { session in
+                guard session.steps.indices.contains(session.activeStepIndex) else { return }
+                session.steps[session.activeStepIndex].state = .needsResolve
+                session.steps[session.activeStepIndex].resolveKind = currentResolve
+            }
+            return
+        }
+
+        let targetEvent: MealEvent
+        if step.type == .edit, let existing = latestEvent(for: step.windowId, on: step.day) {
+            targetEvent = existing
+        } else {
+            let created = MealEvent(
+                windowLabel: step.windowId,
+                timestamp: preferredTimestamp(for: step.windowId, on: step.day),
+                status: .structured,
+                rawText: step.sourceText
+            )
+            created.structureSource = .llm
+            modelContext.insert(created)
+            targetEvent = created
+        }
+
+        targetEvent.rawText = step.sourceText
+        targetEvent.status = .structured
+        targetEvent.structureSource = .llm
+        targetEvent.outOfSync = false
+        targetEvent.baselineTextNormalized = MemoryEngine.normalizeForSync(step.sourceText)
+        targetEvent.structureLastSyncedAt = Date()
+        targetEvent.parseErrorSummary = nil
+        targetEvent.memoryApplied = false
+        targetEvent.confidence = "medium"
+        targetEvent.sourceMode = .ingredientBreakdown
+
+        EstimationRuntime.overwriteSnapshot(
+            event: targetEvent,
+            with: draftProducts.map {
+                LLMClient.EstimateItemResult(
+                    name: $0.name,
+                    grams: $0.grams,
+                    estimatedCalories: $0.estimatedCalories,
+                    estimatedProteins: $0.estimatedProteins,
+                    estimatedFats: $0.estimatedFats,
+                    estimatedCarbs: $0.estimatedCarbs,
+                    impactScore: $0.impactScore,
+                    reason: $0.reason,
+                    saturatedFats: $0.saturatedFats,
+                    sugar: $0.sugar,
+                    fiber: $0.fiber,
+                    sodium: $0.sodium,
+                    foodCategory: $0.foodCategory
+                )
+            },
+            mode: EstimateSourceMode.ingredientBreakdown.rawValue,
+            modelContext: modelContext
+        )
+        let totals = EstimationRuntime.aggregateTotals(items: targetEvent.estimateItems)
+        targetEvent.applyTotals(calories: totals.calories, proteins: totals.proteins, fats: totals.fats, carbs: totals.carbs)
+        try? modelContext.save()
+        ruleEngine.resetWeekIfNeeded()
+        ruleEngine.generateViolations(for: step.day)
+        showCommitFeedback(for: step)
+
+        var shouldFinishSession = false
+        agentSession.updateMealSession { session in
+            guard session.steps.indices.contains(session.activeStepIndex) else { return }
+            session.steps[session.activeStepIndex].state = .committed
+            if session.activeStepIndex < session.steps.count - 1 {
+                session.activeStepIndex += 1
+            } else {
+                shouldFinishSession = true
+            }
+        }
+        if shouldFinishSession {
+            agentSession.markCompleted()
+            agentSession.resetToIdle()
+        }
+    }
+
+    private func showCommitFeedback(for step: MealExecutionStep) {
+        let slotName = windows.first(where: { $0.windowId == step.windowId })?.localizedName(language: languageManager.effectiveLanguage) ?? step.title
+        commitFeedback = step.type == .create ? "\(slotName) сохранен" : "\(slotName) обновлен"
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.4))
+            if commitFeedback != nil {
+                commitFeedback = nil
+            }
         }
     }
 
@@ -463,8 +732,28 @@ struct DashboardView: View {
         return Calendar.current.date(byAdding: .hour, value: 12, to: start) ?? start
     }
 
+    private func preferredTimestamp(for windowId: String, on day: Date) -> Date {
+        let start = Calendar.current.startOfDay(for: day)
+        guard let window = windows.first(where: { $0.windowId == windowId }) else {
+            return Calendar.current.date(byAdding: .hour, value: 12, to: start) ?? start
+        }
+        return Calendar.current.date(byAdding: .hour, value: window.startHour + 1, to: start) ?? start
+    }
+
     private func latestEvent(for windowLabel: String) -> MealEvent? {
         dayEvents.first(where: { $0.windowLabel == windowLabel })
+    }
+
+    private func latestEvent(for windowLabel: String, on day: Date) -> MealEvent? {
+        let range = DashboardDateLogic.dayRange(for: day)
+        let start = range.start
+        let end = range.end
+        let descriptor = FetchDescriptor<MealEvent>(
+            predicate: #Predicate { $0.timestamp >= start && $0.timestamp < end },
+            sortBy: [SortDescriptor(\MealEvent.timestamp, order: .reverse)]
+        )
+        let events = (try? modelContext.fetch(descriptor)) ?? []
+        return events.first(where: { $0.windowLabel == windowLabel })
     }
 
     private func lacksPortionSignal(_ text: String) -> Bool {

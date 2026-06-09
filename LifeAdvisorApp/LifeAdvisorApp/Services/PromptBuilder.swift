@@ -10,6 +10,17 @@ struct PromptBuilder {
     func mealEstimationJSONSchema() -> String {
         let schema = """
         {
+          "_notes": {
+            "item_name_rule": "item.name must be a clean food name only",
+            "item_name_forbidden": [
+              "no parentheses",
+              "no portion markers like 225g, 300 ml, 2 slices, 5%",
+              "no commas",
+              "no packaging qualifiers or serving annotations"
+            ],
+            "item_name_examples_good": ["chicken patty", "whole grain bread", "drinkable yogurt", "blueberries"],
+            "item_name_examples_bad": ["Drinkable plain yogurt (low-fat)", "whole grain bread (2 slices)", "chicken patty 120g", "yogurt 2.5%"]
+          },
           "mode": "ingredient_breakdown|composite_item",
           "totals": {
             "calories": number, "proteins": number, "fats": number, "carbs": number,
@@ -20,7 +31,11 @@ struct PromptBuilder {
           },
           "confidence": "low|medium|high",
           "items": [{
-            "name": string,
+            "name": {
+              "type": "string",
+              "description": "Clean food name only. No brackets, no grams/ml/counts/percentages, no serving annotations.",
+              "pattern": "^(?!.*[()%,])(?!.*\\\\b\\\\d+(?:[.,]\\\\d+)?\\\\s*(?:g|gr|gram|grams|kg|ml|l|liter|liters|slice|slices|piece|pieces|pcs|шт|штук|ломтик|ломтика|ломтиков|г|гр|грамм(?:а|ов)?|кг|мл|л)\\\\b)[A-Za-zА-Яа-яЁё0-9\\\\-\\\\s]+$"
+            },
             "grams": number,
             "estimatedCalories": number,
             "estimatedProteins": number,

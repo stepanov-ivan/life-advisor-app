@@ -1,12 +1,29 @@
 import SwiftUI
 import SwiftData
 
+struct MealSlotExecutionContext {
+    let stepType: MealStepType
+    let products: [MealProductDraft]
+    let selectedDayLabel: String
+    let selectedSlotLabel: String
+    let resolveKind: MealResolveKind?
+    let onNameChange: (UUID, String) -> Void
+    let onGramsChange: (UUID, String) -> Void
+    let onRemove: (UUID) -> Void
+    let onAdd: () -> Void
+    let onConfirm: () -> Void
+    let onResolveToEdit: () -> Void
+    let onResolveToDayOffset: (Int) -> Void
+    let onResolveToWindow: (String) -> Void
+}
+
 struct MealSlotCard: View {
     let windowLabel: String
     let timeRange: String
     let event: MealEvent?
     let engine: RuleEngine
     let onTap: () -> Void
+    let executionContext: MealSlotExecutionContext?
     @StateObject private var languageManager = AppLanguageManager.shared
     @State private var expandedItemId: PersistentIdentifier?
 
@@ -93,6 +110,64 @@ struct MealSlotCard: View {
                 Label(LocalizationHelper.localized("Записать приём пищи", table: "Localizable", language: languageManager.effectiveLanguage), systemImage: "plus.circle")
                     .foregroundColor(.secondary)
             }
+
+            if let executionContext {
+                Divider()
+                    .padding(.top, 4)
+
+                Text(executionContext.stepType == .create ? "Подготовленное создание" : "Подготовленное редактирование")
+                    .font(.caption.bold())
+                    .foregroundColor(.orange)
+
+                HStack(spacing: 8) {
+                    Label(executionContext.selectedDayLabel, systemImage: "calendar")
+                    Label(executionContext.selectedSlotLabel, systemImage: "fork.knife")
+                }
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+                ForEach(executionContext.products) { product in
+                    HStack(spacing: 8) {
+                        TextField("Продукт", text: Binding(
+                            get: { product.name },
+                            set: { executionContext.onNameChange(product.id, $0) }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+
+                        TextField("г", text: Binding(
+                            get: { String(Int(product.grams.rounded())) },
+                            set: { executionContext.onGramsChange(product.id, $0) }
+                        ))
+                        .keyboardType(.numberPad)
+                        .frame(width: 54)
+                        .textFieldStyle(.roundedBorder)
+
+                        Button(role: .destructive) {
+                            executionContext.onRemove(product.id)
+                        } label: {
+                            Image(systemName: "minus.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Text("\(Int(product.estimatedCalories)) ккал  Б \(Int(product.estimatedProteins))  Ж \(Int(product.estimatedFats))  У \(Int(product.estimatedCarbs))")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+
+                Button("Добавить продукт") {
+                    executionContext.onAdd()
+                }
+                .buttonStyle(.bordered)
+
+                if let resolveKind = executionContext.resolveKind {
+                    resolveSection(resolveKind, executionContext: executionContext)
+                }
+
+                Button("Подтвердить") {
+                    executionContext.onConfirm()
+                }
+                .buttonStyle(.borderedProminent)
+            }
         }
         .padding()
         .background(backgroundColor)
@@ -111,6 +186,9 @@ struct MealSlotCard: View {
     }
 
     private var backgroundColor: Color {
+        if executionContext != nil {
+            return Color.orange.opacity(0.15)
+        }
         guard let event else { return Color.gray.opacity(0.15) }
         switch event.status {
         case .empty: return Color.gray.opacity(0.15)
@@ -118,6 +196,65 @@ struct MealSlotCard: View {
         case .structured: return Color.green.opacity(0.2)
         case .parseFailed: return Color.orange.opacity(0.2)
         case .skipped: return Color.gray.opacity(0.15)
+        }
+    }
+
+    @ViewBuilder
+    private func resolveSection(_ resolveKind: MealResolveKind, executionContext: MealSlotExecutionContext) -> some View {
+        switch resolveKind {
+        case .createConflict:
+            Text("На этот день и слот запись уже существует. Можно перейти в редактирование или быстро сменить день и приём пищи.")
+                .font(.caption)
+                .foregroundColor(.orange)
+
+            HStack {
+                Button("Вчера") {
+                    executionContext.onResolveToDayOffset(-1)
+                }
+                Button("Сегодня") {
+                    executionContext.onResolveToDayOffset(0)
+                }
+                Button("Завтра") {
+                    executionContext.onResolveToDayOffset(1)
+                }
+            }
+            .buttonStyle(.bordered)
+
+            HStack {
+                Button("Завтрак") {
+                    executionContext.onResolveToWindow("breakfast")
+                }
+                Button("Обед") {
+                    executionContext.onResolveToWindow("lunch")
+                }
+                Button("Ужин") {
+                    executionContext.onResolveToWindow("dinner")
+                }
+            }
+            .buttonStyle(.bordered)
+
+            Button("Редактировать существующий") {
+                executionContext.onResolveToEdit()
+            }
+            .buttonStyle(.bordered)
+
+        case .missingMealSlot:
+            Text("Нужно выбрать слот приёма пищи, чтобы продолжить выполнение шага.")
+                .font(.caption)
+                .foregroundColor(.orange)
+
+            HStack {
+                Button("Завтрак") {
+                    executionContext.onResolveToWindow("breakfast")
+                }
+                Button("Обед") {
+                    executionContext.onResolveToWindow("lunch")
+                }
+                Button("Ужин") {
+                    executionContext.onResolveToWindow("dinner")
+                }
+            }
+            .buttonStyle(.bordered)
         }
     }
 }
